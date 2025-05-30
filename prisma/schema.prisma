@@ -1,0 +1,125 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  password     String
+  firstName    String
+  lastName     String
+  phone        String?
+  role         Role          @default(CLIENT)
+  reservations Reservation[]
+  payments     Payment[]
+  feedbacks    Feedback[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model Reservation {
+  id        String            @id @default(uuid())
+  user      User              @relation(fields: [userId], references: [id])
+  userId    String
+  eventType EventType
+  start     DateTime
+  end       DateTime
+  attendees Int
+  status    ReservationStatus @default(PENDING)
+  quoteId   String?           @unique
+  quote     Quote?            @relation(fields: [quoteId], references: [id])
+  payments  Payment[]
+  checklist ChecklistItem[]
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  Feedback  Feedback[]
+}
+
+model Payment {
+  id            String        @id @default(uuid())
+  reservation   Reservation   @relation(fields: [reservationId], references: [id])
+  reservationId String
+  amount        Decimal       @db.Decimal(10, 2)
+  currency      String        @default("XOF")
+  type          PaymentType // ACOMPTE | SOLDE | CAUTION
+  status        PaymentStatus // PENDING | PAID | REFUNDED
+  dueDate       DateTime?
+  paidAt        DateTime?
+  createdAt     DateTime      @default(now())
+  User          User?         @relation(fields: [userId], references: [id])
+  userId        String?
+}
+
+model Quote {
+  id          String       @id @default(uuid())
+  reservation Reservation?
+  items       Json
+  totalAmount Decimal      @db.Decimal(10, 2)
+  currency    String       @default("XOF")
+  createdAt   DateTime     @default(now())
+}
+
+model ChecklistItem {
+  id            String      @id @default(uuid())
+  reservation   Reservation @relation(fields: [reservationId], references: [id])
+  reservationId String
+  title         String
+  completed     Boolean     @default(false)
+  assignedTo    String?
+  dueAt         DateTime?
+}
+
+model Feedback {
+  id            String       @id @default(uuid())
+  user          User         @relation(fields: [userId], references: [id])
+  userId        String
+  reservationId String?
+  reservation   Reservation? @relation(fields: [reservationId], references: [id])
+  rating        Int          @default(5)
+  comment       String?
+  createdAt     DateTime     @default(now())
+}
+
+enum Role {
+  ADMIN
+  EVENT_MANAGER
+  CLIENT
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  CANCELED
+  COMPLETED
+}
+
+enum PaymentType {
+  ACOMPTE
+  SOLDE
+  CAUTION
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  REFUNDED
+}
+
+enum EventType {
+  MARIAGE
+  ANNIVERSAIRE
+  PROFESSIONNEL
+  AUTRE
+}
