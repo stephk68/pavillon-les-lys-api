@@ -14,7 +14,9 @@ import { UpdateUserDto } from './dto/update-user.dto';
 export class UserService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(createUserDto: CreateUserDto): Promise<Omit<User, 'password'>> {
+  async register(
+    createUserDto: CreateUserDto,
+  ): Promise<Omit<User, 'password'>> {
     // Vérifier si l'utilisateur existe déjà
     const existingUser = await this.prisma.user.findUnique({
       where: { email: createUserDto.email },
@@ -31,12 +33,62 @@ export class UserService {
       saltRounds,
     );
 
-    // Créer l'utilisateur
+    // Créer l'utilisateur avec le rôle CLIENT par défaut
     const user = await this.prisma.user.create({
       data: {
         ...createUserDto,
         password: hashedPassword,
-        role: createUserDto.role || Role.CLIENT,
+        role: Role.CLIENT,
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        role: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return user;
+  }
+
+  async createStaff(
+    createUserDto: CreateUserDto,
+  ): Promise<Omit<User, 'password'>> {
+    // Vérifier si l'utilisateur existe déjà
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: createUserDto.email },
+    });
+
+    if (existingUser) {
+      throw new ConflictException('Un utilisateur avec cet email existe déjà');
+    }
+
+    // Valider que le rôle est ADMIN ou EVENT_MANAGER
+    if (
+      !createUserDto.role ||
+      (createUserDto.role !== Role.ADMIN &&
+        createUserDto.role !== Role.EVENT_MANAGER)
+    ) {
+      throw new BadRequestException('Le rôle doit être ADMIN ou EVENT_MANAGER');
+    }
+
+    // Hasher le mot de passe
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(
+      createUserDto.password,
+      saltRounds,
+    );
+
+    // Créer l'utilisateur staff
+    const user = await this.prisma.user.create({
+      data: {
+        ...createUserDto,
+        password: hashedPassword,
+        role: createUserDto.role,
       },
       select: {
         id: true,

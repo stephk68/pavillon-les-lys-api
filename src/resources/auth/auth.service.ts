@@ -29,7 +29,7 @@ export class AuthService {
     }
 
     // Créer l'utilisateur
-    const user = await this.userService.create(registerDto);
+    const user = await this.userService.register(registerDto);
 
     // Générer le token
     const payload = { sub: user.id, email: user.email, role: user.role };
