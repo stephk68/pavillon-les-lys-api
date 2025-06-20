@@ -1,98 +1,318 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Pavillon Les Lys - API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
-
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+API REST pour la gestion des réservations et événements du Pavillon Les Lys.
 
 ## Description
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+Application NestJS avec TypeScript pour la gestion complète d'un système de réservation d'événements, incluant la gestion des utilisateurs, réservations, paiements, devis et feedback.
 
-## Project setup
+## Fonctionnalités
 
-```bash
-$ yarn install
+### 🔐 Authentification et Autorisation
+
+- **Inscription/Connexion** : Système complet d'authentification JWT
+- **Gestion des rôles** : CLIENT, STAFF, ADMIN avec permissions spécifiques
+- **Réinitialisation de mot de passe** : Système sécurisé de récupération
+- **Protection des routes** : Guards personnalisés sans Passport
+
+### 👥 Gestion des Utilisateurs
+
+- **CRUD complet** des utilisateurs avec validation
+- **Profils détaillés** : Informations personnelles et préférences
+- **Recherche et filtrage** par nom, email, rôle
+- **Statistiques utilisateur** : Réservations, paiements totaux
+- **Gestion des permissions** : Utilisateurs ne peuvent modifier que leurs données
+
+### 📅 Système de Réservation
+
+- **Création de réservations** : Différents types d'événements supportés
+- **Vérification de disponibilité** : Système anti-conflit automatique
+- **Gestion des statuts** : PENDING → CONFIRMED → COMPLETED ou CANCELLED
+- **Calendrier intégré** : Visualisation des créneaux disponibles
+- **Notifications** : Alertes pour les réservations à venir
+
+### 💰 Gestion des Paiements
+
+- **Suivi des paiements** : PENDING, PAID, FAILED, REFUNDED
+- **Intégration gateway** : Préparé pour Stripe, PayPal, etc.
+- **Facturation** : Génération automatique de factures
+- **Statistiques financières** : Revenus mensuels, totaux
+- **Remboursements** : Système de gestion des retours
+
+### 📋 Système de Devis
+
+- **Création de devis** : Items multiples avec calculs automatiques
+- **Liaison réservations** : Connexion devis ↔ réservations
+- **Gestion des items** : Ajout, modification, suppression dynamique
+- **Export/Import** : Formats multiples supportés
+- **Duplication** : Réutilisation de devis existants
+
+### 📝 Feedback et Évaluations
+
+- **Collecte d'avis** : Notes et commentaires clients
+- **Modération** : Système de validation des commentaires
+- **Statistiques** : Moyennes et analyses des retours
+- **Amélioration continue** : Identification des points d'amélioration
+
+### 📊 Tableau de Bord et Analytics
+
+- **Métriques en temps réel** : Réservations, revenus, utilisateurs
+- **Graphiques** : Évolution des données dans le temps
+- **Exports** : Rapports détaillés en PDF/Excel
+- **Alertes** : Notifications pour événements importants
+
+## Architecture Technique
+
+### Stack
+
+- **Framework** : NestJS avec TypeScript
+- **Base de données** : PostgreSQL avec Prisma ORM
+- **Authentification** : JWT avec guards personnalisés
+- **Validation** : class-validator et class-transformer
+- **Documentation** : Swagger/OpenAPI automatique
+
+### Structure du Projet
+
+```
+src/
+├── common/           # Services, guards, decorators partagés
+│   ├── decorators/   # @CurrentUser, @Public, @Roles
+│   ├── guards/       # Authentication, Authorization
+│   └── services/     # PrismaService
+├── resources/        # Modules métier
+│   ├── auth/         # Authentification
+│   ├── user/         # Gestion utilisateurs
+│   ├── reservation/  # Système réservation
+│   ├── payment/      # Gestion paiements
+│   ├── quote/        # Système devis
+│   └── feedback/     # Avis clients
+└── middleware/       # Middlewares globaux
 ```
 
-## Compile and run the project
+### Sécurité
+
+- **JWT sécurisé** : Tokens avec expiration
+- **CORS configuré** : Protection cross-origin
+- **Validation stricte** : Tous les inputs validés
+- **Rate limiting** : Protection contre le spam
+- **Encryption** : Mots de passe hashés avec bcrypt
+
+## Installation et Démarrage
+
+### Prérequis
+
+- Node.js 18+ et Yarn
+- PostgreSQL 14+
+- Git
+
+### Installation
 
 ```bash
-# development
-$ yarn run start
+# Cloner le repository
+git clone <repository-url>
+cd pavillon-les-lys-api
 
-# watch mode
-$ yarn run start:dev
+# Installer les dépendances
+yarn install
 
-# production mode
-$ yarn run start:prod
+# Configuration environnement
+cp .env.example .env
+# Configurer les variables dans .env
+
+# Setup base de données
+yarn prisma generate
+yarn prisma migrate dev
+yarn prisma db seed  # Optionnel
 ```
 
-## Run tests
+### Variables d'environnement
+
+```env
+DATABASE_URL="postgresql://user:password@localhost:5432/pavilion_db"
+JWT_SECRET="your-super-secret-jwt-key"
+PORT=3000
+NODE_ENV="development"
+```
+
+## Démarrage de l'application
 
 ```bash
-# unit tests
-$ yarn run test
+# Mode développement avec hot-reload
+yarn run start:dev
 
-# e2e tests
-$ yarn run test:e2e
+# Mode production
+yarn run build
+yarn run start:prod
 
-# test coverage
-$ yarn run test:cov
+# Mode debug
+yarn run start:debug
 ```
 
-## Deployment
+## Tests
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+L'API dispose d'une architecture de tests complète couvrant tous les services, guards et endpoints principaux.
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### Architecture des Tests
+
+```
+src/test/
+├── unit/              # Tests unitaires (services, guards)
+├── integration/       # Tests d'intégration (endpoints)
+├── mocks/            # Mocks Prisma et services
+└── setup.ts          # Configuration globale
+```
+
+### Commandes de Tests
 
 ```bash
-$ yarn install -g @nestjs/mau
-$ mau deploy
+# Tous les tests
+yarn run test
+
+# Tests unitaires uniquement
+yarn run test:unit
+yarn run test:unit:watch
+
+# Tests d'intégration uniquement
+yarn run test:integration
+
+# Tests end-to-end
+yarn run test:e2e
+
+# Couverture de code
+yarn run test:cov
+yarn run test:unit:cov
+
+# Tests en mode watch
+yarn run test:watch
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+### Services Testés
 
-## Resources
+- ✅ **AuthService** - Authentification complète
+- ✅ **UserService** - Gestion des utilisateurs
+- ✅ **ReservationService** - Système de réservation
+- ✅ **PaymentService** - Gestion des paiements
+- ✅ **QuoteService** - Système de devis
+- ✅ **Guards** - Authentification et autorisation
 
-Check out a few resources that may come in handy when working with NestJS:
+### Tests d'Intégration
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+- ✅ **Auth endpoints** - Login, register, profile
+- ✅ **User endpoints** - CRUD utilisateurs
+- ✅ **Reservation endpoints** - Gestion réservations
 
-## Support
+> 📖 **Documentation détaillée** : [src/test/README.md](src/test/README.md)
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+## Base de Données
 
-## Stay in touch
+```bash
+# Générer le client Prisma
+yarn prisma generate
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+# Créer une migration
+yarn prisma migrate dev --name <nom-migration>
+
+# Réinitialiser la DB
+yarn prisma migrate reset
+
+# Ouvrir Prisma Studio
+yarn prisma studio
+```
+
+## API Documentation
+
+Une fois l'application démarrée, la documentation Swagger est disponible à :
+
+- **Local** : http://localhost:3000/api/docs
+- **Production** : https://your-domain.com/api/docs
+
+### 📮 Collection Postman
+
+Une collection Postman complète est disponible avec tous les endpoints et exemples :
+
+- **Collection** : `postman/Pavillon-Les-Lys-API.postman_collection.json`
+- **Environnement Dev** : `postman/Pavillon-Les-Lys-Development.postman_environment.json`
+- **Environnement Prod** : `postman/Pavillon-Les-Lys-Production.postman_environment.json`
+
+#### 🚀 Installation rapide
+
+1. Importez les 3 fichiers JSON dans Postman
+2. Sélectionnez l'environnement "Development"
+3. Utilisez **Register** puis **Login** pour commencer
+4. Le token est automatiquement sauvegardé pour tous les autres endpoints
+
+#### 📋 Fonctionnalités incluses
+
+- ✅ **78 endpoints** couvrant toute l'API
+- ✅ **Tests automatisés** avec sauvegarde de tokens
+- ✅ **Exemples complets** avec données réalistes
+- ✅ **Workflow de réservation** de bout en bout
+- ✅ **Variables d'environnement** pré-configurées
+- ✅ **Documentation détaillée** : [postman/README.md](postman/README.md)
+
+## Déploiement
+
+### Docker
+
+```bash
+# Build et démarrage
+docker-compose up -d
+
+# Logs
+docker-compose logs -f api
+```
+
+### Production
+
+```bash
+# Build optimisé
+yarn build
+
+# Démarrage production
+yarn start:prod
+
+# Avec PM2
+pm2 start ecosystem.config.js
+```
+
+## Configuration
+
+### CORS
+
+```typescript
+// main.ts
+app.enableCors({
+  origin: ['http://localhost:3000', 'https://your-frontend.com'],
+  credentials: true,
+});
+```
+
+### Swagger
+
+```typescript
+// main.ts
+const config = new DocumentBuilder()
+  .setTitle('Pavillon Les Lys API')
+  .setDescription('API de gestion des réservations')
+  .setVersion('1.0')
+  .addBearerAuth()
+  .build();
+```
+
+## Contribution
+
+1. **Fork** le project
+2. **Créer** une branche feature (`git checkout -b feature/amazing-feature`)
+3. **Commit** les changements (`git commit -m 'Add amazing feature'`)
+4. **Push** vers la branche (`git push origin feature/amazing-feature`)
+5. **Ouvrir** une Pull Request
+
+## Support et Contact
+
+- **Email** : support@pavilion-les-lys.com
+- **Documentation** : [docs.pavilion-les-lys.com](https://docs.pavilion-les-lys.com)
+- **Issues** : [GitHub Issues](https://github.com/your-org/pavillon-les-lys-api/issues)
 
 ## License
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Ce projet est sous licence MIT. Voir le fichier [LICENSE](LICENSE) pour plus de détails.

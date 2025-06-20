@@ -1,20 +1,17 @@
 import { EventType } from '@prisma/client';
-import { IsDateString, IsEnum, IsInt, IsString, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsInt, Min } from 'class-validator';
 
 export class CreateReservationDto {
   @IsEnum(EventType)
   eventType: EventType;
 
   @IsDateString()
-  start: Date;
+  start: string;
 
   @IsDateString()
-  end: Date;
+  end: string;
 
   @IsInt()
   @Min(1)
   attendees: number;
-
-  @IsString()
-  notes?: string;
 }

@@ -12,7 +12,6 @@ import { UpdateReservationDto } from './dto/update-reservation.dto';
 @Injectable()
 export class ReservationService {
   constructor(private readonly prisma: PrismaService) {}
-
   async create(
     createReservationDto: CreateReservationDto,
     userId: string,
@@ -33,18 +32,19 @@ export class ReservationService {
 
     // Vérifier les conflits de réservation
     const conflictingReservation = await this.checkAvailability(
-      createReservationDto.start,
-      createReservationDto.end,
+      new Date(createReservationDto.start),
+      new Date(createReservationDto.end),
     );
 
     if (conflictingReservation) {
       throw new ConflictException("Le créneau demandé n'est pas disponible");
-    }
-
-    // Créer la réservation
+    } // Créer la réservation
     const reservation = await this.prisma.reservation.create({
       data: {
-        ...createReservationDto,
+        eventType: createReservationDto.eventType,
+        start: new Date(createReservationDto.start),
+        end: new Date(createReservationDto.end),
+        attendees: createReservationDto.attendees,
         userId,
         status: ReservationStatus.PENDING,
       },
