@@ -3,34 +3,34 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
-} from '@nestjs/common';
-import { Role, User } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
-import { PrismaService } from '../../common/services/prisma.service';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
+} from "@nestjs/common";
+import { Role, User } from "@prisma/client";
+import * as bcrypt from "bcrypt";
+import { PrismaService } from "../../common/services/prisma.service";
+import { CreateUserDto } from "./dto/create-user.dto";
+import { UpdateUserDto } from "./dto/update-user.dto";
 
 @Injectable()
 export class UserService {
   constructor(private readonly prisma: PrismaService) {}
 
   async register(
-    createUserDto: CreateUserDto,
-  ): Promise<Omit<User, 'password'>> {
+    createUserDto: CreateUserDto
+  ): Promise<Omit<User, "password">> {
     // Vérifier si l'utilisateur existe déjà
     const existingUser = await this.prisma.user.findUnique({
       where: { email: createUserDto.email },
     });
 
     if (existingUser) {
-      throw new ConflictException('Un utilisateur avec cet email existe déjà');
+      throw new ConflictException("Un utilisateur avec cet email existe déjà");
     }
 
     // Hasher le mot de passe
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(
       createUserDto.password,
-      saltRounds,
+      saltRounds
     );
 
     // Créer l'utilisateur avec le rôle CLIENT par défaut
@@ -47,8 +47,12 @@ export class UserService {
         lastName: true,
         phone: true,
         role: true,
+        isFirstLogin: true,
+        lastLoginAt: true,
         createdAt: true,
         updatedAt: true,
+        createdBy: true,
+        updatedBy: true,
       },
     });
 
@@ -56,15 +60,15 @@ export class UserService {
   }
 
   async createStaff(
-    createUserDto: CreateUserDto,
-  ): Promise<Omit<User, 'password'>> {
+    createUserDto: CreateUserDto
+  ): Promise<Omit<User, "password">> {
     // Vérifier si l'utilisateur existe déjà
     const existingUser = await this.prisma.user.findUnique({
       where: { email: createUserDto.email },
     });
 
     if (existingUser) {
-      throw new ConflictException('Un utilisateur avec cet email existe déjà');
+      throw new ConflictException("Un utilisateur avec cet email existe déjà");
     }
 
     // Valider que le rôle est ADMIN ou EVENT_MANAGER
@@ -73,14 +77,14 @@ export class UserService {
       (createUserDto.role !== Role.ADMIN &&
         createUserDto.role !== Role.EVENT_MANAGER)
     ) {
-      throw new BadRequestException('Le rôle doit être ADMIN ou EVENT_MANAGER');
+      throw new BadRequestException("Le rôle doit être ADMIN ou EVENT_MANAGER");
     }
 
     // Hasher le mot de passe
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(
       createUserDto.password,
-      saltRounds,
+      saltRounds
     );
 
     // Créer l'utilisateur staff
@@ -97,8 +101,12 @@ export class UserService {
         lastName: true,
         phone: true,
         role: true,
+        isFirstLogin: true,
+        lastLoginAt: true,
         createdAt: true,
         updatedAt: true,
+        createdBy: true,
+        updatedBy: true,
       },
     });
 
@@ -109,7 +117,7 @@ export class UserService {
     role?: Role;
     skip?: number;
     take?: number;
-  }): Promise<Omit<User, 'password'>[]> {
+  }): Promise<Omit<User, "password">[]> {
     const { role, skip = 0, take = 50 } = options || {};
 
     return this.prisma.user.findMany({
@@ -123,14 +131,18 @@ export class UserService {
         lastName: true,
         phone: true,
         role: true,
+        isFirstLogin: true,
+        lastLoginAt: true,
         createdAt: true,
         updatedAt: true,
+        createdBy: true,
+        updatedBy: true,
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
     });
   }
 
-  async findOne(id: string): Promise<Omit<User, 'password'>> {
+  async findOne(id: string): Promise<Omit<User, "password">> {
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
@@ -140,8 +152,12 @@ export class UserService {
         lastName: true,
         phone: true,
         role: true,
+        isFirstLogin: true,
+        lastLoginAt: true,
         createdAt: true,
         updatedAt: true,
+        createdBy: true,
+        updatedBy: true,
         reservations: {
           select: {
             id: true,
@@ -151,7 +167,7 @@ export class UserService {
             status: true,
             attendees: true,
           },
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
         },
       },
     });
@@ -171,8 +187,8 @@ export class UserService {
 
   async update(
     id: string,
-    updateUserDto: UpdateUserDto,
-  ): Promise<Omit<User, 'password'>> {
+    updateUserDto: UpdateUserDto
+  ): Promise<Omit<User, "password">> {
     // Vérifier si l'utilisateur existe
     await this.findOne(id);
 
@@ -183,7 +199,7 @@ export class UserService {
       });
 
       if (existingUser && existingUser.id !== id) {
-        throw new ConflictException('Cet email est déjà utilisé');
+        throw new ConflictException("Cet email est déjà utilisé");
       }
     }
 
@@ -197,8 +213,12 @@ export class UserService {
         lastName: true,
         phone: true,
         role: true,
+        isFirstLogin: true,
+        lastLoginAt: true,
         createdAt: true,
         updatedAt: true,
+        createdBy: true,
+        updatedBy: true,
       },
     });
 
@@ -208,7 +228,7 @@ export class UserService {
   async updatePassword(
     id: string,
     currentPassword: string,
-    newPassword: string,
+    newPassword: string
   ): Promise<void> {
     const user = await this.prisma.user.findUnique({
       where: { id },
@@ -221,10 +241,10 @@ export class UserService {
     // Vérifier le mot de passe actuel
     const isCurrentPasswordValid = await bcrypt.compare(
       currentPassword,
-      user.password,
+      user.password
     );
     if (!isCurrentPasswordValid) {
-      throw new BadRequestException('Le mot de passe actuel est incorrect');
+      throw new BadRequestException("Le mot de passe actuel est incorrect");
     }
 
     // Hasher le nouveau mot de passe
@@ -245,13 +265,13 @@ export class UserService {
     const activeReservations = await this.prisma.reservation.findMany({
       where: {
         userId: id,
-        status: { in: ['PENDING', 'CONFIRMED'] },
+        status: { in: ["PENDING", "CONFIRMED"] },
       },
     });
 
     if (activeReservations.length > 0) {
       throw new BadRequestException(
-        'Impossible de supprimer cet utilisateur car il a des réservations actives',
+        "Impossible de supprimer cet utilisateur car il a des réservations actives"
       );
     }
 
@@ -264,7 +284,7 @@ export class UserService {
     const user = await this.findOne(id);
 
     const stats = await this.prisma.reservation.groupBy({
-      by: ['status'],
+      by: ["status"],
       where: { userId: id },
       _count: true,
     });
@@ -272,7 +292,7 @@ export class UserService {
     const totalSpent = await this.prisma.payment.aggregate({
       where: {
         userId: id,
-        status: 'PAID',
+        status: "PAID",
       },
       _sum: {
         amount: true,
@@ -286,13 +306,13 @@ export class UserService {
     };
   }
 
-  async searchUsers(query: string): Promise<Omit<User, 'password'>[]> {
+  async searchUsers(query: string): Promise<Omit<User, "password">[]> {
     return this.prisma.user.findMany({
       where: {
         OR: [
-          { firstName: { contains: query, mode: 'insensitive' } },
-          { lastName: { contains: query, mode: 'insensitive' } },
-          { email: { contains: query, mode: 'insensitive' } },
+          { firstName: { contains: query, mode: "insensitive" } },
+          { lastName: { contains: query, mode: "insensitive" } },
+          { email: { contains: query, mode: "insensitive" } },
         ],
       },
       select: {
@@ -302,14 +322,18 @@ export class UserService {
         lastName: true,
         phone: true,
         role: true,
+        isFirstLogin: true,
+        lastLoginAt: true,
         createdAt: true,
         updatedAt: true,
+        createdBy: true,
+        updatedBy: true,
       },
       take: 20,
     });
   }
 
-  async getUsersByRole(role: Role): Promise<Omit<User, 'password'>[]> {
+  async getUsersByRole(role: Role): Promise<Omit<User, "password">[]> {
     return this.findAll({ role });
   }
 
@@ -319,7 +343,7 @@ export class UserService {
 
   async validatePassword(
     password: string,
-    hashedPassword: string,
+    hashedPassword: string
   ): Promise<boolean> {
     return bcrypt.compare(password, hashedPassword);
   }

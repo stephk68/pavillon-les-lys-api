@@ -22,11 +22,15 @@ model User {
   lastName     String
   phone        String?
   role         Role          @default(CLIENT)
+  isFirstLogin Boolean       @default(true)
+  lastLoginAt  DateTime?
   reservations Reservation[]
   payments     Payment[]
   feedbacks    Feedback[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
+  createdBy    String?
+  updatedBy    String?
 }
 
 model Reservation {
@@ -42,9 +46,11 @@ model Reservation {
   quote     Quote?            @relation(fields: [quoteId], references: [id])
   payments  Payment[]
   checklist ChecklistItem[]
+  Feedback  Feedback[]
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
-  Feedback  Feedback[]
+  createdBy String?
+  updatedBy String?
 }
 
 model Payment {
@@ -57,9 +63,12 @@ model Payment {
   status        PaymentStatus // PENDING | PAID | REFUNDED
   dueDate       DateTime?
   paidAt        DateTime?
-  createdAt     DateTime      @default(now())
   User          User?         @relation(fields: [userId], references: [id])
   userId        String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  createdBy     String?
+  updatedBy     String?
 }
 
 model Quote {
@@ -69,6 +78,9 @@ model Quote {
   totalAmount Decimal      @db.Decimal(10, 2)
   currency    String       @default("XOF")
   createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  createdBy   String?
+  updatedBy   String?
 }
 
 model ChecklistItem {
@@ -79,6 +91,10 @@ model ChecklistItem {
   completed     Boolean     @default(false)
   assignedTo    String?
   dueAt         DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  createdBy     String?
+  updatedBy     String?
 }
 
 model Feedback {
@@ -90,6 +106,9 @@ model Feedback {
   rating        Int          @default(5)
   comment       String?
   createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  createdBy     String?
+  updatedBy     String?
 }
 
 enum Role {

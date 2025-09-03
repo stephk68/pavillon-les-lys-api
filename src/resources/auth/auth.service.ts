@@ -3,29 +3,31 @@ import {
   ConflictException,
   Injectable,
   UnauthorizedException,
-} from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcrypt';
-import { PrismaService } from '../../common/services/prisma.service';
-import { UserService } from '../user/user.service';
-import { ForgotPasswordDto } from './dto/forgot-password.dto';
-import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
-import { ResetPasswordDto } from './dto/reset-password.dto';
+} from "@nestjs/common";
+import { JwtService } from "@nestjs/jwt";
+import * as bcrypt from "bcrypt";
+import { PrismaService } from "../../common/services/prisma.service";
+import { UserService } from "../user/user.service";
+import { ChangePasswordDto } from "./dto/change-password.dto";
+import { FirstLoginPasswordDto } from "./dto/first-login-password.dto";
+import { ForgotPasswordDto } from "./dto/forgot-password.dto";
+import { LoginDto } from "./dto/login.dto";
+import { RegisterDto } from "./dto/register.dto";
+import { ResetPasswordDto } from "./dto/reset-password.dto";
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly userService: UserService,
-    private readonly jwtService: JwtService,
+    private readonly jwtService: JwtService
   ) {}
 
   async register(registerDto: RegisterDto) {
     // Vérifier si l'utilisateur existe déjà
     const existingUser = await this.userService.findByEmail(registerDto.email);
     if (existingUser) {
-      throw new ConflictException('Un utilisateur avec cet email existe déjà');
+      throw new ConflictException("Un utilisateur avec cet email existe déjà");
     }
 
     // Créer l'utilisateur
@@ -45,17 +47,26 @@ export class AuthService {
     // Trouver l'utilisateur par email
     const user = await this.userService.findByEmail(loginDto.email);
     if (!user) {
-      throw new UnauthorizedException('Email ou mot de passe incorrect');
+      throw new UnauthorizedException("Email ou mot de passe incorrect");
     }
 
     // Vérifier le mot de passe
     const isPasswordValid = await this.userService.validatePassword(
       loginDto.password,
-      user.password,
+      user.password
     );
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Email ou mot de passe incorrect');
+      throw new UnauthorizedException("Email ou mot de passe incorrect");
     }
+
+    // Mettre à jour la dernière connexion et vérifier si c'est la première connexion
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        // lastLoginAt: new Date(), // TODO: Ajouter après migration
+        // La première connexion reste true jusqu'à ce que l'utilisateur change son mot de passe
+      },
+    });
 
     // Générer le token
     const payload = { sub: user.id, email: user.email, role: user.role };
@@ -67,6 +78,7 @@ export class AuthService {
     return {
       user: userWithoutPassword,
       access_token: token,
+      // isFirstLogin: user.isFirstLogin, // TODO: Ajouter après migration
     };
   }
 
@@ -87,14 +99,14 @@ export class AuthService {
       // Ne pas révéler que l'email n'existe pas pour des raisons de sécurité
       return {
         message:
-          'Si cet email existe, un lien de réinitialisation a été envoyé',
+          "Si cet email existe, un lien de réinitialisation a été envoyé",
       };
     }
 
     // Générer un token de réinitialisation
     const resetToken = this.jwtService.sign(
-      { sub: user.id, type: 'password-reset' },
-      { expiresIn: '1h' },
+      { sub: user.id, type: "password-reset" },
+      { expiresIn: "1h" }
     );
 
     // Stocker le token en base (optionnel, dépend de votre stratégie)
@@ -111,10 +123,10 @@ export class AuthService {
     // await this.emailService.sendPasswordResetEmail(user.email, resetToken);
 
     return {
-      message: 'Si cet email existe, un lien de réinitialisation a été envoyé',
+      message: "Si cet email existe, un lien de réinitialisation a été envoyé",
       // En développement seulement
       resetToken:
-        process.env.NODE_ENV === 'development' ? resetToken : undefined,
+        process.env.NODE_ENV === "development" ? resetToken : undefined,
     };
   }
 
@@ -123,15 +135,15 @@ export class AuthService {
       // Vérifier le token
       const payload = this.jwtService.verify(resetPasswordDto.token);
 
-      if (payload.type !== 'password-reset') {
-        throw new BadRequestException('Token de réinitialisation invalide');
+      if (payload.type !== "password-reset") {
+        throw new BadRequestException("Token de réinitialisation invalide");
       }
 
       // Mettre à jour le mot de passe
       const saltRounds = 10;
       const hashedPassword = await bcrypt.hash(
         resetPasswordDto.newPassword,
-        saltRounds,
+        saltRounds
       );
 
       await this.prisma.user.update({
@@ -143,10 +155,10 @@ export class AuthService {
         },
       });
 
-      return { message: 'Mot de passe réinitialisé avec succès' };
+      return { message: "Mot de passe réinitialisé avec succès" };
     } catch (error) {
       throw new BadRequestException(
-        'Token de réinitialisation invalide ou expiré',
+        "Token de réinitialisation invalide ou expiré"
       );
     }
   }
@@ -159,10 +171,67 @@ export class AuthService {
     // Si vous utilisez une blacklist de tokens, ajoutez-le ici
     // await this.addTokenToBlacklist(token);
 
-    return { message: 'Déconnexion réussie' };
+    return { message: "Déconnexion réussie" };
   }
 
   async getProfile(userId: string) {
     return this.userService.findOne(userId);
+  }
+
+  async changePasswordFirstLogin(
+    userId: string,
+    firstLoginPasswordDto: FirstLoginPasswordDto
+  ) {
+    // Vérifier que les mots de passe correspondent
+    if (
+      firstLoginPasswordDto.newPassword !==
+      firstLoginPasswordDto.confirmPassword
+    ) {
+      throw new BadRequestException("Les mots de passe ne correspondent pas");
+    }
+
+    // Hasher le nouveau mot de passe
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(
+      firstLoginPasswordDto.newPassword,
+      saltRounds
+    );
+
+    // Mettre à jour le mot de passe et marquer que ce n'est plus la première connexion
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        password: hashedPassword,
+        // isFirstLogin: false, // TODO: Ajouter après migration
+        // updatedBy: userId, // TODO: Ajouter après migration
+      },
+    });
+
+    return { message: "Mot de passe modifié avec succès" };
+  }
+
+  async changePassword(userId: string, changePasswordDto: ChangePasswordDto) {
+    // Vérifier que les mots de passe correspondent
+    if (changePasswordDto.newPassword !== changePasswordDto.confirmPassword) {
+      throw new BadRequestException("Les mots de passe ne correspondent pas");
+    }
+
+    // Hasher le nouveau mot de passe
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(
+      changePasswordDto.newPassword,
+      saltRounds
+    );
+
+    // Mettre à jour le mot de passe
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        password: hashedPassword,
+        // updatedBy: userId, // TODO: Ajouter après migration
+      },
+    });
+
+    return { message: "Mot de passe modifié avec succès" };
   }
 }

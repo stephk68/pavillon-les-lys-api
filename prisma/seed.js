@@ -9,13 +9,13 @@ const {
   ReservationStatus,
   PaymentType,
   PaymentStatus,
-} = require('@prisma/client');
-const bcrypt = require('bcrypt');
+} = require("@prisma/client");
+const bcrypt = require("bcrypt");
 
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🔰 Starting seed...');
+  console.log("🔰 Starting seed...");
 
   // Idempotency: if users already exist, skip full seed
   const userCount = await prisma.user.count();
@@ -24,49 +24,53 @@ async function main() {
     return;
   }
 
-  const passwordPlain = 'Password123!';
+  const passwordPlain = "Password123!";
   const passwordHash = await bcrypt.hash(passwordPlain, 10);
 
   // 1) Users
   const [admin, manager, client1, client2] = await Promise.all([
     prisma.user.create({
       data: {
-        email: 'admin@pavillon-les-lys.fr',
+        email: "admin@pavillon-les-lys.fr",
         password: passwordHash,
-        firstName: 'Admin',
-        lastName: 'Root',
+        firstName: "Admin",
+        lastName: "Root",
         role: Role.ADMIN,
-        phone: '+22960000001',
+        phone: "+22960000001",
+        isFirstLogin: false, // Admin n'a pas besoin de changer son mot de passe
       },
     }),
     prisma.user.create({
       data: {
-        email: 'manager@pavillon-les-lys.fr',
+        email: "manager@pavillon-les-lys.fr",
         password: passwordHash,
-        firstName: 'Event',
-        lastName: 'Manager',
+        firstName: "Event",
+        lastName: "Manager",
         role: Role.EVENT_MANAGER,
-        phone: '+22960000002',
+        phone: "+22960000002",
+        isFirstLogin: false, // Manager n'a pas besoin de changer son mot de passe
       },
     }),
     prisma.user.create({
       data: {
-        email: 'client1@pavillon-les-lys.fr',
+        email: "client1@pavillon-les-lys.fr",
         password: passwordHash,
-        firstName: 'Alice',
-        lastName: 'Kossi',
+        firstName: "Alice",
+        lastName: "Kossi",
         role: Role.CLIENT,
-        phone: '+22960000003',
+        phone: "+22960000003",
+        isFirstLogin: true, // Client doit changer son mot de passe à la première connexion
       },
     }),
     prisma.user.create({
       data: {
-        email: 'client2@pavillon-les-lys.fr',
+        email: "client2@pavillon-les-lys.fr",
         password: passwordHash,
-        firstName: 'Benoit',
-        lastName: 'Akpo',
+        firstName: "Benoit",
+        lastName: "Akpo",
         role: Role.CLIENT,
-        phone: '+22960000004',
+        phone: "+22960000004",
+        isFirstLogin: true, // Client doit changer son mot de passe à la première connexion
       },
     }),
   ]);
@@ -84,6 +88,7 @@ async function main() {
         end: daysFromNow(31),
         attendees: 120,
         status: ReservationStatus.CONFIRMED,
+        createdBy: admin.id,
       },
     }),
     prisma.reservation.create({
@@ -94,6 +99,7 @@ async function main() {
         end: daysFromNow(10),
         attendees: 30,
         status: ReservationStatus.PENDING,
+        createdBy: manager.id,
       },
     }),
     prisma.reservation.create({
@@ -104,6 +110,7 @@ async function main() {
         end: daysFromNow(60),
         attendees: 80,
         status: ReservationStatus.PENDING,
+        createdBy: admin.id,
       },
     }),
   ]);
@@ -111,16 +118,16 @@ async function main() {
   // 3) Quotes for reservations
   for (const res of reservations) {
     const items = [
-      { label: 'Location salle', qty: 1, unit: 'forfait', price: 300000 },
-      { label: 'Décoration', qty: 1, unit: 'forfait', price: 150000 },
-      { label: 'Traiteur', qty: res.attendees, unit: 'pers', price: 8000 },
+      { label: "Location salle", qty: 1, unit: "forfait", price: 300000 },
+      { label: "Décoration", qty: 1, unit: "forfait", price: 150000 },
+      { label: "Traiteur", qty: res.attendees, unit: "pers", price: 8000 },
     ];
     const total = items.reduce((sum, it) => sum + it.qty * it.price, 0);
     const quote = await prisma.quote.create({
       data: {
         items,
         totalAmount: new Prisma.Decimal(total),
-        currency: 'XOF',
+        currency: "XOF",
       },
     });
     await prisma.reservation.update({
@@ -135,7 +142,7 @@ async function main() {
       data: {
         reservationId: res.id,
         amount: new Prisma.Decimal(200000),
-        currency: 'XOF',
+        currency: "XOF",
         type: PaymentType.ACOMPTE,
         status: PaymentStatus.PAID,
         paidAt: daysFromNow(-1),
@@ -145,7 +152,7 @@ async function main() {
       data: {
         reservationId: res.id,
         amount: new Prisma.Decimal(300000),
-        currency: 'XOF',
+        currency: "XOF",
         type: PaymentType.SOLDE,
         status: PaymentStatus.PENDING,
         dueDate: daysFromNow(7),
@@ -160,18 +167,18 @@ async function main() {
       data: [
         {
           reservationId: res.id,
-          title: 'Signature du contrat',
+          title: "Signature du contrat",
           completed: true,
         },
-        { reservationId: res.id, title: 'Acompte reçu' },
-        { reservationId: res.id, title: 'Plan de table' },
+        { reservationId: res.id, title: "Acompte reçu" },
+        { reservationId: res.id, title: "Plan de table" },
       ],
     });
   }
 
   // 6) Feedback (for confirmed reservation)
   const confirmed = reservations.find(
-    (r) => r.status === ReservationStatus.CONFIRMED,
+    (r) => r.status === ReservationStatus.CONFIRMED
   );
   if (confirmed) {
     await prisma.feedback.create({
@@ -179,17 +186,17 @@ async function main() {
         userId: client1.id,
         reservationId: confirmed.id,
         rating: 5,
-        comment: 'Service excellent et équipe très professionnelle. Merci !',
+        comment: "Service excellent et équipe très professionnelle. Merci !",
       },
     });
   }
 
-  console.log('✅ Seed completed');
+  console.log("✅ Seed completed");
 }
 
 main()
   .catch((e) => {
-    console.error('❌ Seed failed:', e);
+    console.error("❌ Seed failed:", e);
     process.exit(1);
   })
   .finally(async () => {
