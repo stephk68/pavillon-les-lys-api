@@ -54,3 +54,225 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Docker
+.docker/
+docker-compose.override.yml
+.dockerignore
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+database.db
+prisma/.env
+
+# Package managers
+yarn.lock
+package-lock.json
+npm-shrinkwrap.json
+.pnpm-store/
+.yarn/
+.pnp.*
+
+# Build artifacts
+/build
+/out
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Cache directories
+.cache/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+
+# Test coverage
+/coverage
+/nyc_output
+/test-results
+/playwright-report
+coverage.xml
+junit.xml
+*.lcov
+
+# Local development
+.local
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Runtime and process files
+pids/
+*.pid
+*.seed
+*.pid.lock
+.pidfile
+
+# Logs and debug files
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.npm/
+.eslintrc.log
+
+# Environment and config files
+.env*
+!.env.example
+.envrc
+config/local.json
+config/production.json
+config/development.json
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+.temp/
+*.tmp
+*.temp
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.AppleDouble
+.LSOverride
+
+# Windows
+desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.orig
+
+# Archive files
+*.tar
+*.tar.gz
+*.zip
+*.rar
+*.7z
+
+# IDE and editor files
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.sublime-project
+*.sublime-workspace
+.brackets.json
+*.code-workspace
+
+# Documentation build files
+/docs/build/
+/docs/.docusaurus/
+.docusaurus/
+
+# Storybook
+storybook-static/
+
+# Next.js
+.next/
+out/
+
+# Nuxt.js
+.nuxt/
+dist/
+
+# Production build files
+/dist/
+/build/
+/public/build/
+
+# Local data and uploads
+uploads/
+data/
+*.csv
+*.xlsx
+*.xls
+
+# Security and sensitive files
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# Postman generated files (keep collections but ignore generated/temp files)
+postman/newman/
+postman/results/
+*.postman_globals
+*.postman_collection.backup
+
+# Docker development files
+docker-compose.dev.yml
+docker-compose.local.yml
+Dockerfile.dev
+.dockerignore.dev
+
+# Prisma development files
+prisma/dev.db*
+prisma/migrations/.migration_lock.toml.backup
+
+# Performance and profiling
+*.cpuprofile
+*.heapsnapshot
+profile.json
+.clinic/
+
+# Miscellaneous
+.serverless/
+.webpack/
+.rollup.cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+.rpt2_cache/
+
+# Documentation files (keep only README.md)
+*.md
+!README.md
+
+# Test files and directories
+/test/
+/tests/
+/__tests__/
+/src/test/
+/src/tests/
+*.test.js
+*.test.ts
+*.spec.js
+*.spec.ts
+*.e2e-spec.js
+*.e2e-spec.ts
+jest.config.*
+jest-*.json
+test-setup.*
+setupTests.*
+*.test.json
+*.spec.json
+
+# Dossier scripts
+/scripts/

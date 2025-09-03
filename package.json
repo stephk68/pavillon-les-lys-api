@@ -22,7 +22,18 @@
     "test:unit:watch": "jest --config ./src/test/jest-unit.json --watch",
     "test:unit:cov": "jest --config ./src/test/jest-unit.json --coverage",
     "test:integration": "jest --testRegex=.*\\.integration\\.spec\\.ts$",
-    "test:integration:watch": "jest --testRegex=.*\\.integration\\.spec\\.ts$ --watch"
+    "test:integration:watch": "jest --testRegex=.*\\.integration\\.spec\\.ts$ --watch",
+    "docker:build": "docker build -t kysaymeric/pavillon-les-lys:1.1 .",
+    "docker:push": "docker push kysaymeric/pavillon-les-lys:1.1",
+    "docker:up": "docker compose up -d",
+    "docker:logs": "docker compose logs -f",
+    "docker:stop": "docker compose down",
+    "prisma:generate": "npx prisma generate",
+    "prisma:migrate": "npx prisma migrate dev",
+    "prisma:deploy": "npx prisma migrate deploy",
+    "prisma:studio": "npx prisma studio",
+    "seed": "node prisma/seed.js",
+    "db:seed": "npx prisma db seed"
   },
   "dependencies": {
     "@devoxa/aes-encryption": "^2.0.0",
@@ -88,5 +99,8 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
   }
 }

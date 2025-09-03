@@ -99,13 +99,38 @@ src/
 
 ## Installation et Démarrage
 
-### Prérequis
+### 🐳 Déploiement Docker (Recommandé)
+
+La méthode la plus simple pour déployer l'application :
+
+```bash
+# Cloner le repository
+git clone <repository-url>
+cd pavillon-les-lys-api
+
+# Configuration de l'environnement
+cp .env.example .env
+# Éditer .env avec vos valeurs
+
+# Démarrage avec Docker Compose
+docker compose up -d
+
+# Initialisation de la base de données (migrations + seed)
+docker compose exec api npx prisma migrate deploy
+docker compose exec api npx prisma db seed
+```
+
+📖 **Guide complet** : [DATASET.md](DATASET.md)
+
+### 🛠️ Installation locale (Développement)
+
+#### Prérequis
 
 - Node.js 18+ et Yarn
 - PostgreSQL 14+
 - Git
 
-### Installation
+#### Installation
 
 ```bash
 # Cloner le repository
@@ -154,7 +179,7 @@ L'API dispose d'une architecture de tests complète couvrant tous les services, 
 
 ### Architecture des Tests
 
-```
+```text
 src/test/
 ├── unit/              # Tests unitaires (services, guards)
 ├── integration/       # Tests d'intégration (endpoints)
@@ -215,6 +240,9 @@ yarn prisma migrate dev --name <nom-migration>
 # Réinitialiser la DB
 yarn prisma migrate reset
 
+# Seed (jeu de données de démonstration)
+yarn db:seed
+
 # Ouvrir Prisma Studio
 yarn prisma studio
 ```
@@ -223,8 +251,8 @@ yarn prisma studio
 
 Une fois l'application démarrée, la documentation Swagger est disponible à :
 
-- **Local** : http://localhost:3000/api/docs
-- **Production** : https://your-domain.com/api/docs
+- **Local** : <http://localhost:3000/api/docs>
+- **Production** : <https://your-domain.com/api/docs>
 
 ### 📮 Collection Postman
 
@@ -256,10 +284,10 @@ Une collection Postman complète est disponible avec tous les endpoints et exemp
 
 ```bash
 # Build et démarrage
-docker-compose up -d
+docker compose up -d
 
 # Logs
-docker-compose logs -f api
+docker compose logs -f api
 ```
 
 ### Production
@@ -282,7 +310,7 @@ pm2 start ecosystem.config.js
 ```typescript
 // main.ts
 app.enableCors({
-  origin: ['http://localhost:3000', 'https://your-frontend.com'],
+  origin: ["http://localhost:3000", "https://your-frontend.com"],
   credentials: true,
 });
 ```
@@ -292,9 +320,9 @@ app.enableCors({
 ```typescript
 // main.ts
 const config = new DocumentBuilder()
-  .setTitle('Pavillon Les Lys API')
-  .setDescription('API de gestion des réservations')
-  .setVersion('1.0')
+  .setTitle("Pavillon Les Lys API")
+  .setDescription("API de gestion des réservations")
+  .setVersion("1.0")
   .addBearerAuth()
   .build();
 ```
@@ -309,10 +337,16 @@ const config = new DocumentBuilder()
 
 ## Support et Contact
 
-- **Email** : support@pavilion-les-lys.com
+- **Email** : <support@pavilion-les-lys.com>
 - **Documentation** : [docs.pavilion-les-lys.com](https://docs.pavilion-les-lys.com)
 - **Issues** : [GitHub Issues](https://github.com/your-org/pavillon-les-lys-api/issues)
 
 ## License
 
 Ce projet est sous licence MIT. Voir le fichier [LICENSE](LICENSE) pour plus de détails.
+
+---
+
+Ressources utiles:
+
+- Données initiales semées: voir DATASET.md
