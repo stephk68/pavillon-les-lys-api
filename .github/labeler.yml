@@ -1,0 +1,119 @@
+# Configuration for automatic labeling of pull requests
+
+# Authentication & Security
+"auth/*":
+  - authentication
+  - security
+
+"**/auth/**":
+  - authentication
+  - security
+
+# Database & Prisma
+"prisma/**":
+  - database
+  - prisma
+
+"**/migrations/**":
+  - database
+  - migration
+
+"**/*.prisma":
+  - database
+  - schema
+
+# API & Controllers
+"**/controllers/**":
+  - api
+  - controller
+
+"**/services/**":
+  - service
+  - backend
+
+"**/dto/**":
+  - api
+  - dto
+
+# Testing
+"**/*test*":
+  - testing
+
+"**/*spec*":
+  - testing
+
+"test/**":
+  - testing
+
+"src/test/**":
+  - testing
+
+# Infrastructure & DevOps
+"docker*":
+  - infrastructure
+  - docker
+
+".github/**":
+  - ci/cd
+  - github-actions
+
+"*.yml":
+  - configuration
+
+"*.yaml":
+  - configuration
+
+# Documentation
+"*.md":
+  - documentation
+
+"docs/**":
+  - documentation
+
+# Dependencies
+"package.json":
+  - dependencies
+
+"yarn.lock":
+  - dependencies
+
+# Configuration
+".env*":
+  - configuration
+
+"nest-cli.json":
+  - configuration
+
+"tsconfig*.json":
+  - configuration
+
+# Core modules
+"src/common/**":
+  - core
+  - common
+
+"src/guards/**":
+  - security
+  - guard
+
+"src/middleware/**":
+  - middleware
+
+# Resources
+"src/resources/user/**":
+  - user-management
+
+"src/resources/reservation/**":
+  - reservation
+
+"src/resources/payment/**":
+  - payment
+
+"src/resources/quote/**":
+  - quote
+
+"src/resources/feedback/**":
+  - feedback
+
+# Size-based labels (GitHub automatically applies these)
+# But we can customize thresholds in .github/settings.yml if needed

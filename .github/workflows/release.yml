@@ -1,0 +1,494 @@
+name: 🏷️ Release Management
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Triggered on version tags like v1.0.0
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 1.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Is this a pre-release?'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  NODE_VERSION: '20.x'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # =========================================
+  # JOB 1: Validate Release
+  # =========================================
+  validate-release:
+    name: ✅ Validate Release
+    runs-on: ubuntu-latest
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is-prerelease: ${{ steps.version.outputs.prerelease }}
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🏷️ Extract version information
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+            PRERELEASE="${{ github.event.inputs.prerelease }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            PRERELEASE="false"
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "prerelease=$PRERELEASE" >> $GITHUB_OUTPUT
+          echo "📋 Release version: $VERSION"
+          echo "📋 Pre-release: $PRERELEASE"
+
+      - name: 🔍 Validate version format
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
+            echo "❌ Invalid version format: $VERSION"
+            echo "Expected format: X.Y.Z or X.Y.Z-suffix"
+            exit 1
+          fi
+          echo "✅ Version format is valid: $VERSION"
+
+      - name: 📋 Check if tag exists
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if git rev-parse "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "❌ Tag v$VERSION already exists"
+            exit 1
+          fi
+          echo "✅ Tag v$VERSION is available"
+
+  # =========================================
+  # JOB 2: Run Full Test Suite
+  # =========================================
+  test-release:
+    name: 🧪 Test Release
+    runs-on: ubuntu-latest
+    needs: validate-release
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: release_test
+          POSTGRES_USER: release_user
+          POSTGRES_PASSWORD: release_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'yarn'
+
+      - name: 📦 Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: 🔍 Run all linting
+        run: yarn lint
+
+      - name: 🎨 Check formatting
+        run: yarn format --check
+
+      - name: 🔨 Build application
+        run: yarn build
+
+      - name: 🗄️ Setup test database
+        env:
+          DATABASE_URL: postgresql://release_user:release_password@localhost:5432/release_test
+        run: |
+          echo "DATABASE_URL=${{ env.DATABASE_URL }}" > .env
+          echo "JWT_SECRET=release-test-secret" >> .env
+          echo "JWT_EXPIRES_IN=24h" >> .env
+          yarn prisma generate
+          yarn prisma migrate deploy
+          yarn db:seed
+
+      - name: 🧪 Run complete test suite
+        env:
+          DATABASE_URL: postgresql://release_user:release_password@localhost:5432/release_test
+          JWT_SECRET: release-test-secret
+          JWT_EXPIRES_IN: 24h
+        run: |
+          yarn test:unit
+          yarn test:integration
+          yarn test:e2e
+
+  # =========================================
+  # JOB 3: Build Release Artifacts
+  # =========================================
+  build-release:
+    name: 🔨 Build Release
+    runs-on: ubuntu-latest
+    needs: [validate-release, test-release]
+
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🔧 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔑 Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Extract metadata for release
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}},value=v${{ needs.validate-release.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ needs.validate-release.outputs.version }}
+            type=semver,pattern={{major}},value=v${{ needs.validate-release.outputs.version }}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: 🔨 Build and push release image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 🔍 Scan release image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.validate-release.outputs.version }}
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
+  # =========================================
+  # JOB 4: Generate Release Notes
+  # =========================================
+  generate-changelog:
+    name: 📝 Generate Changelog
+    runs-on: ubuntu-latest
+    needs: validate-release
+
+    outputs:
+      changelog: ${{ steps.changelog.outputs.changelog }}
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📝 Generate changelog
+        id: changelog
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          echo "📋 Generating changelog for v$VERSION"
+          
+          if [[ -n "$PREVIOUS_TAG" ]]; then
+            echo "📊 Changes since $PREVIOUS_TAG:"
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" $PREVIOUS_TAG..HEAD | head -50)
+          else
+            echo "📊 Initial release changelog:"
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" | head -20)
+          fi
+          
+          # Create detailed changelog
+          cat << EOF > RELEASE_NOTES.md
+          # 🚀 Pavillon Les Lys API v$VERSION
+          
+          ## 📋 Changes in this release:
+          
+          $CHANGELOG
+          
+          ## 🔗 Quick Links:
+          - 🐳 Docker Image: \`ghcr.io/${{ github.repository }}:$VERSION\`
+          - 📚 API Documentation: [View Docs](https://api.pavillon-les-lys.fr/docs)
+          - 🗄️ Database Migrations: Run \`yarn prisma migrate deploy\`
+          
+          ## 🛠️ Deployment:
+          
+          ### Docker Compose:
+          \`\`\`yaml
+          version: '3.8'
+          services:
+            api:
+              image: ghcr.io/${{ github.repository }}:$VERSION
+              # ... your configuration
+          \`\`\`
+          
+          ### Environment Variables:
+          Make sure to update your environment variables according to the latest \`.env.example\`.
+          
+          ## ⚠️ Breaking Changes:
+          $(if [[ "$VERSION" == *"0."* ]]; then echo "This is a pre-1.0 release and may contain breaking changes."; else echo "No breaking changes in this release."; fi)
+          
+          ## 📊 Stats:
+          - Commits: $(git rev-list --count $PREVIOUS_TAG..HEAD 2>/dev/null || git rev-list --count HEAD)
+          - Contributors: $(git shortlog -sn $PREVIOUS_TAG..HEAD 2>/dev/null | wc -l || git shortlog -sn | wc -l)
+          EOF
+          
+          # Set output for later steps
+          CHANGELOG_CONTENT=$(cat RELEASE_NOTES.md)
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: 📤 Upload release notes
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-notes
+          path: RELEASE_NOTES.md
+
+  # =========================================
+  # JOB 5: Create GitHub Release
+  # =========================================
+  create-release:
+    name: 🏷️ Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [validate-release, test-release, build-release, generate-changelog]
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 📥 Download release notes
+        uses: actions/download-artifact@v3
+        with:
+          name: release-notes
+
+      - name: 🏷️ Create Git tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin "v$VERSION"
+
+      - name: 🚀 Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.validate-release.outputs.version }}
+          name: 🚀 Pavillon Les Lys API v${{ needs.validate-release.outputs.version }}
+          body_path: RELEASE_NOTES.md
+          prerelease: ${{ needs.validate-release.outputs.is-prerelease == 'true' }}
+          draft: false
+          files: |
+            docker-compose.yml
+            .env.example
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # =========================================
+  # JOB 6: Deploy Release
+  # =========================================
+  deploy-release:
+    name: 🌟 Deploy Release
+    runs-on: ubuntu-latest
+    needs: [validate-release, create-release]
+    if: needs.validate-release.outputs.is-prerelease == 'false'
+    environment: 
+      name: production
+      url: https://api.pavillon-les-lys.fr
+
+    steps:
+      - name: 🔧 Setup SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+
+      - name: 🚀 Deploy release to production
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          ssh -o StrictHostKeyChecking=no ${{ secrets.PRODUCTION_USER }}@${{ secrets.PRODUCTION_HOST }} << EOF
+            cd /opt/pavillon-les-lys-api
+            
+            # Backup current version
+            docker-compose down
+            docker tag \$(docker images --format "table {{.Repository}}:{{.Tag}}" | grep pavillon-les-lys | head -1) pavillon-les-lys:backup-\$(date +%Y%m%d)
+            
+            # Update to new version
+            sed -i "s/pavillon-les-lys:.*/pavillon-les-lys:$VERSION/" docker-compose.yml
+            docker-compose pull
+            docker-compose up -d
+            
+            # Run migrations
+            sleep 10
+            docker-compose exec -T api yarn prisma migrate deploy
+            
+            # Health check
+            sleep 20
+            curl -f http://localhost:3000/health || exit 1
+            
+            echo "✅ Successfully deployed v$VERSION"
+          EOF
+
+      - name: 🏥 Verify deployment
+        run: |
+          sleep 30
+          curl -f https://api.pavillon-les-lys.fr/health || exit 1
+          echo "✅ Production deployment verified"
+
+  # =========================================
+  # JOB 7: Notification & Cleanup
+  # =========================================
+  notify-release:
+    name: 📢 Notify Release
+    runs-on: ubuntu-latest
+    needs: [validate-release, create-release, deploy-release]
+    if: always()
+
+    steps:
+      - name: 💬 Slack notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              "text": "🚀 New Release: Pavillon Les Lys API v${{ needs.validate-release.outputs.version }}",
+              "attachments": [
+                {
+                  "color": "${{ needs.create-release.result == 'success' && needs.deploy-release.result == 'success' && 'good' || 'danger' }}",
+                  "fields": [
+                    {
+                      "title": "Version",
+                      "value": "v${{ needs.validate-release.outputs.version }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Pre-release",
+                      "value": "${{ needs.validate-release.outputs.is-prerelease }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Release Status",
+                      "value": "${{ needs.create-release.result }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Deploy Status",
+                      "value": "${{ needs.deploy-release.result }}",
+                      "short": true
+                    }
+                  ],
+                  "actions": [
+                    {
+                      "type": "button",
+                      "text": "View Release",
+                      "url": "${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ needs.validate-release.outputs.version }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: 📧 Email notification
+        if: needs.create-release.result == 'success'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "🚀 New Release: Pavillon Les Lys API v${{ needs.validate-release.outputs.version }}"
+          to: ${{ secrets.RELEASE_NOTIFICATION_EMAIL }}
+          from: "GitHub Actions <releases@pavillon-les-lys.fr>"
+          body: |
+            A new version of Pavillon Les Lys API has been released!
+            
+            Version: v${{ needs.validate-release.outputs.version }}
+            Pre-release: ${{ needs.validate-release.outputs.is-prerelease }}
+            
+            🔗 View release: ${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ needs.validate-release.outputs.version }}
+            🐳 Docker image: ghcr.io/${{ github.repository }}:${{ needs.validate-release.outputs.version }}
+            
+            The release has been automatically deployed to production and is now live.
+
+  # =========================================
+  # JOB 8: Update Documentation
+  # =========================================
+  update-docs:
+    name: 📚 Update Documentation
+    runs-on: ubuntu-latest
+    needs: [validate-release, create-release]
+    if: needs.create-release.result == 'success'
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📝 Update version in files
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          
+          # Update package.json version
+          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
+          
+          # Update README.md with latest version
+          if grep -q "Version:" README.md; then
+            sed -i "s/Version: .*/Version: $VERSION/" README.md
+          else
+            echo "Version: $VERSION" >> README.md
+          fi
+          
+          # Update docker-compose.yml example
+          if [ -f docker-compose.example.yml ]; then
+            sed -i "s/pavillon-les-lys:.*/pavillon-les-lys:$VERSION/" docker-compose.example.yml
+          fi
+
+      - name: 💾 Commit version updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git diff --staged --quiet || git commit -m "📝 Update version to v${{ needs.validate-release.outputs.version }} [skip ci]"
+          git push
