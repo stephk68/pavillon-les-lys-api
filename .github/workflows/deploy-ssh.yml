@@ -77,19 +77,27 @@ jobs:
 
               echo "== Check Docker & Compose =="
               # Vérifier Docker
-              if ! docker --version >/dev/null 2>&1; then
-                if ! (echo "$PASS" | sudo -S docker --version >/dev/null 2>&1); then
-                  echo "❌ Docker not available or user needs sudo access"
-                  exit 11
-                fi
-                echo "✅ Docker available with sudo"
-              else
+              DOCKER_AVAILABLE=false
+              DOCKER_NEEDS_SUDO=false
+              
+              if docker --version >/dev/null 2>&1; then
+                DOCKER_AVAILABLE=true
                 echo "✅ Docker available"
                 docker --version
+              elif echo "$PASS" | sudo -S docker --version >/dev/null 2>&1; then
+                DOCKER_AVAILABLE=true
+                DOCKER_NEEDS_SUDO=true
+                echo "✅ Docker available with sudo"
+                echo "$PASS" | sudo -S docker --version
+              else
+                echo "❌ Docker not available"
+                exit 11
               fi
 
               # Vérifier Docker Compose
               COMPOSE_AVAILABLE=false
+              COMPOSE_NEEDS_SUDO=false
+              
               if docker compose version >/dev/null 2>&1; then
                 COMPOSE_AVAILABLE=true
                 echo "✅ Docker Compose V2 available"
@@ -98,12 +106,16 @@ jobs:
                 COMPOSE_AVAILABLE=true
                 echo "✅ Docker Compose V1 available"
                 docker-compose version
-              elif (echo "$PASS" | sudo -S docker compose version >/dev/null 2>&1); then
+              elif echo "$PASS" | sudo -S docker compose version >/dev/null 2>&1; then
                 COMPOSE_AVAILABLE=true
+                COMPOSE_NEEDS_SUDO=true
                 echo "✅ Docker Compose V2 available with sudo"
-              elif (echo "$PASS" | sudo -S docker-compose version >/dev/null 2>&1); then
+                echo "$PASS" | sudo -S docker compose version
+              elif echo "$PASS" | sudo -S docker-compose version >/dev/null 2>&1; then
                 COMPOSE_AVAILABLE=true
+                COMPOSE_NEEDS_SUDO=true
                 echo "✅ Docker Compose V1 available with sudo"
+                echo "$PASS" | sudo -S docker-compose version
               fi
 
               if [ "$COMPOSE_AVAILABLE" = false ]; then
@@ -116,10 +128,8 @@ jobs:
               echo "== Docker Hub login (optional) =="
               if [ -n "${{ secrets.DOCKERHUB_USERNAME || '' }}" ]; then
                 echo "Attempting Docker Hub login..."
-                if echo "${{ secrets.DOCKERHUB_TOKEN || '' }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin 2>/dev/null; then
+                if echo "${{ secrets.DOCKERHUB_TOKEN || '' }}" | run_docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin 2>/dev/null; then
                   echo "✅ Docker Hub login successful"
-                elif echo "${{ secrets.DOCKERHUB_TOKEN || '' }}" | (echo "$PASS" | sudo -S docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin) 2>/dev/null; then
-                  echo "✅ Docker Hub login successful (with sudo)"
                 else
                   echo "⚠️ Docker Hub login failed, continuing anyway"
                 fi
@@ -129,26 +139,26 @@ jobs:
 
               echo "== Helper functions =="
               run_docker() {
-                if docker "$@" 2>/dev/null; then
-                  return 0
-                elif echo "$PASS" | sudo -S docker "$@" 2>/dev/null; then
-                  return 0
+                if [ "$DOCKER_NEEDS_SUDO" = true ]; then
+                  echo "$PASS" | sudo -S docker "$@"
                 else
-                  return 1
+                  docker "$@"
                 fi
               }
 
               run_compose() {
-                if docker compose "$@" 2>/dev/null; then
-                  return 0
-                elif docker-compose "$@" 2>/dev/null; then
-                  return 0
-                elif echo "$PASS" | sudo -S docker compose "$@" 2>/dev/null; then
-                  return 0
-                elif echo "$PASS" | sudo -S docker-compose "$@" 2>/dev/null; then
-                  return 0
+                if [ "$COMPOSE_NEEDS_SUDO" = true ]; then
+                  if echo "$PASS" | sudo -S docker compose version >/dev/null 2>&1; then
+                    echo "$PASS" | sudo -S docker compose "$@"
+                  else
+                    echo "$PASS" | sudo -S docker-compose "$@"
+                  fi
                 else
-                  return 1
+                  if docker compose version >/dev/null 2>&1; then
+                    docker compose "$@"
+                  else
+                    docker-compose "$@"
+                  fi
                 fi
               }
 
