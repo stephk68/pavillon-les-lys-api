@@ -80,94 +80,96 @@ jobs:
                 echo "$PASS" | sudo -S docker --version
               fi
 
-            COMPOSE_NEEDS_SUDO=false
-            if docker compose version >/dev/null 2>&1; then
-              docker compose version
-            elif command -v docker-compose >/dev/null 2>&1; then
-              docker-compose version
-            elif echo "$PASS" | sudo -S docker compose version >/dev/null 2>&1; then
-              COMPOSE_NEEDS_SUDO=true
-              echo "$PASS" | sudo -S docker compose version
-            elif echo "$PASS" | sudo -S docker-compose version >/dev/null 2>&1; then
-              COMPOSE_NEEDS_SUDO=true
-              echo "$PASS" | sudo -S docker-compose version
-            else
-              echo "❌ Docker Compose not found. Install: sudo apt-get update && sudo apt-get install -y docker-compose-plugin"
-              exit 12
-            fi
-
-            echo "== Helpers =="
-            run_docker() {
-              if [ "$DOCKER_NEEDS_SUDO" = true ]; then
-                echo "$PASS" | sudo -S docker "$@"
-              else
-                docker "$@"
-              fi
-            }
-            run_compose() {
+              COMPOSE_NEEDS_SUDO=false
               if docker compose version >/dev/null 2>&1; then
-                if [ "$COMPOSE_NEEDS_SUDO" = true ]; then
-                  echo "$PASS" | sudo -S docker compose "$@"
+                docker compose version
+              elif command -v docker-compose >/dev/null 2>&1; then
+                docker-compose version
+              elif echo "$PASS" | sudo -S docker compose version >/dev/null 2>&1; then
+                COMPOSE_NEEDS_SUDO=true
+                echo "$PASS" | sudo -S docker compose version
+              elif echo "$PASS" | sudo -S docker-compose version >/dev/null 2>&1; then
+                COMPOSE_NEEDS_SUDO=true
+                echo "$PASS" | sudo -S docker-compose version
+              else
+                echo "❌ Docker Compose not found. Install: sudo apt-get update && sudo apt-get install -y docker-compose-plugin"
+                exit 12
+              fi
+
+              echo "== Helpers =="
+              run_docker() {
+                if [ "$DOCKER_NEEDS_SUDO" = true ]; then
+                  echo "$PASS" | sudo -S docker "$@"
                 else
-                  docker compose "$@"
+                  docker "$@"
+                fi
+              }
+              run_compose() {
+                if docker compose version >/dev/null 2>&1; then
+                  if [ "$COMPOSE_NEEDS_SUDO" = true ]; then
+                    echo "$PASS" | sudo -S docker compose "$@"
+                  else
+                    docker compose "$@"
+                  fi
+                else
+                  if [ "$COMPOSE_NEEDS_SUDO" = true ]; then
+                    echo "$PASS" | sudo -S docker-compose "$@"
+                  else
+                    docker-compose "$@"
+                  fi
+                fi
+              }
+
+              echo "== Docker Hub login (optional) =="
+              if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+                echo "${{ secrets.DOCKERHUB_TOKEN }}" | run_docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin || true
+              else
+                echo "No Docker Hub credentials provided, skipping login"
+              fi
+
+              echo "== Capture pre-deployment image =="
+              PRE_IMAGE=$(run_docker ps --filter "name=^/pavillon-api$" --format "{{.Image}}" 2>/dev/null || echo "none")
+              echo "PRE_IMAGE=$PRE_IMAGE"
+
+              echo "== Update .env IMAGE_TAG =="
+              if [ -f .env ]; then
+                if grep -q "^IMAGE_TAG=" .env; then
+                  sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=${IMAGE_TAG}/" .env
+                else
+                  echo "IMAGE_TAG=${IMAGE_TAG}" >> .env
                 fi
               else
-                if [ "$COMPOSE_NEEDS_SUDO" = true ]; then
-                  echo "$PASS" | sudo -S docker-compose "$@"
-                else
-                  docker-compose "$@"
-                fi
+                echo "IMAGE_TAG=${IMAGE_TAG}" > .env
               fi
-            }
+              echo "--- .env ---"; cat .env; echo "-------------"
 
-            echo "== Docker Hub login (optional) =="
-            if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
-              echo "${{ secrets.DOCKERHUB_TOKEN }}" | run_docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin || true
-            else
-              echo "No Docker Hub credentials provided, skipping login"
-            fi
+              echo "== Pull & Deploy service: ${SERVICE} =="
+              run_compose pull "${SERVICE}"
+              run_compose up -d "${SERVICE}"
 
-            echo "== Capture pre-deployment image =="
-            PRE_IMAGE=$(run_docker ps --filter "name=^/pavillon-api$" --format "{{.Image}}" 2>/dev/null || echo "none")
-            echo "PRE_IMAGE=$PRE_IMAGE"
+              echo "== Capture post-deployment image =="
+              sleep 3
+              POST_IMAGE=$(run_docker ps --filter "name=^/pavillon-api$" --format "{{.Image}}" 2>/dev/null || echo "none")
+              echo "POST_IMAGE=$POST_IMAGE"
 
-            echo "== Update .env IMAGE_TAG =="
-            if [ -f .env ]; then
-              if grep -q "^IMAGE_TAG=" .env; then
-                sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=${IMAGE_TAG}/" .env
-              else
-                echo "IMAGE_TAG=${IMAGE_TAG}" >> .env
-              fi
-            else
-              echo "IMAGE_TAG=${IMAGE_TAG}" > .env
-            fi
-            echo "--- .env ---"; cat .env; echo "-------------"
-
-            echo "== Pull & Deploy service: ${SERVICE} =="
-            run_compose pull "${SERVICE}"
-            run_compose up -d "${SERVICE}"
-
-            echo "== Capture post-deployment image =="
-            sleep 3
-            POST_IMAGE=$(run_docker ps --filter "name=^/pavillon-api$" --format "{{.Image}}" 2>/dev/null || echo "none")
-            echo "POST_IMAGE=$POST_IMAGE"
-
-            DATE_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-            echo "::notice title=Deployment::${SERVICE} déployé avec le tag ${IMAGE_TAG}"
-            echo "SERVER=${{ secrets.VPS_HOST }}"
-            echo "SERVICE=${SERVICE}"
-            echo "TAG=${IMAGE_TAG}"
-            echo "PRE_IMAGE=${PRE_IMAGE}"
-            echo "POST_IMAGE=${POST_IMAGE}"
-            echo "DATE=${DATE_UTC}"
-            echo "DEPLOY_DIR=${DEPLOY_DIR}"
+              DATE_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+              echo "::notice title=Deployment::${SERVICE} déployé avec le tag ${IMAGE_TAG}"
+              echo "SERVER=${{ secrets.VPS_HOST }}"
+              echo "SERVICE=${SERVICE}"
+              echo "TAG=${IMAGE_TAG}"
+              echo "PRE_IMAGE=${PRE_IMAGE}"
+              echo "POST_IMAGE=${POST_IMAGE}"
+              echo "DATE=${DATE_UTC}"
+              echo "DEPLOY_DIR=${DEPLOY_DIR}"
 
               echo "== Cleanup old images =="
               run_docker image prune -f || true
 
               echo "== Final status =="
               run_docker ps --filter "name=pavillon-api" --format "table {{.Names}}\\t{{.Status}}\\t{{.Image}}" || true
-            '      - name: Publish Job Summary
+            '
+
+      - name: Publish Job Summary
         run: |
           {
             echo "## 🚀 Déploiement — Pavillon Les Lys (production)";
