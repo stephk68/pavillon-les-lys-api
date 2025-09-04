@@ -47,7 +47,7 @@ jobs:
             });
             core.setOutput('deployment_id', res.data.id);
 
-      - name: SSH & deploy (password auth)
+      - name: SSH & deploy (password auth, bash + debug)
         id: ssh_deploy
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -58,53 +58,171 @@ jobs:
           command_timeout: 30m
           script_stop: true
           script: |
-            set -e
-            SERVICE="${SERVICE}"
-            DEPLOY_DIR="${DEPLOY_DIR}"
+            bash -lc '
+              set -euxo pipefail
+              set -x
+              SERVICE="${SERVICE:-api}"
+              DEPLOY_DIR="${DEPLOY_DIR}"
+              PASS="${{ secrets.VPS_PASSWORD }}"
 
-            cd "${DEPLOY_DIR}"
+              echo "== Check directory =="
+              if [ ! -d "$DEPLOY_DIR" ]; then
+                echo "❌ Directory $DEPLOY_DIR does not exist"
+                exit 10
+              fi
+              ls -ld "$DEPLOY_DIR"
+              cd "$DEPLOY_DIR"
+              echo "✅ Working directory: $(pwd)"
 
-            # (facultatif) Login Docker Hub si image privée
-            if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
-              echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin || true
-            fi
+              echo "== Check Docker & Compose =="
+              # Vérifier Docker
+              if ! docker --version >/dev/null 2>&1; then
+                if ! (echo "$PASS" | sudo -S docker --version >/dev/null 2>&1); then
+                  echo "❌ Docker not available or user needs sudo access"
+                  exit 11
+                fi
+                echo "✅ Docker available with sudo"
+              else
+                echo "✅ Docker available"
+                docker --version
+              fi
 
-            PRE_IMAGE=$(docker ps --filter "name=^/pavillon-api$" --format "{{.Image}}" || true)
+              # Vérifier Docker Compose
+              COMPOSE_AVAILABLE=false
+              if docker compose version >/dev/null 2>&1; then
+                COMPOSE_AVAILABLE=true
+                echo "✅ Docker Compose V2 available"
+                docker compose version
+              elif command -v docker-compose >/dev/null 2>&1; then
+                COMPOSE_AVAILABLE=true
+                echo "✅ Docker Compose V1 available"
+                docker-compose version
+              elif (echo "$PASS" | sudo -S docker compose version >/dev/null 2>&1); then
+                COMPOSE_AVAILABLE=true
+                echo "✅ Docker Compose V2 available with sudo"
+              elif (echo "$PASS" | sudo -S docker-compose version >/dev/null 2>&1); then
+                COMPOSE_AVAILABLE=true
+                echo "✅ Docker Compose V1 available with sudo"
+              fi
 
-            # Met à jour le tag dans .env (créé s'il n'existe pas)
-            if [ -f .env ]; then
-              sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=${{ github.event.inputs.tag }}/" .env
-            else
-              echo "IMAGE_TAG=${{ github.event.inputs.tag }}" > .env
-            fi
+              if [ "$COMPOSE_AVAILABLE" = false ]; then
+                echo "❌ Docker Compose not found. Install with:"
+                echo "sudo apt-get update && sudo apt-get install -y docker-compose-plugin"
+                echo "or for older versions: sudo apt-get install -y docker-compose"
+                exit 12
+              fi
 
-            # Pull + Up (compose V2, fallback V1, avec sudo si besoin)
-            docker compose pull "${SERVICE}" \
-            || docker-compose pull "${SERVICE}" \
-            || (echo "${{ secrets.VPS_PASSWORD }}" | sudo -S docker compose pull "${SERVICE}") \
-            || (echo "${{ secrets.VPS_PASSWORD }}" | sudo -S docker-compose pull "${SERVICE}")
+              echo "== Docker Hub login (optional) =="
+              if [ -n "${{ secrets.DOCKERHUB_USERNAME || '' }}" ]; then
+                echo "Attempting Docker Hub login..."
+                if echo "${{ secrets.DOCKERHUB_TOKEN || '' }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin 2>/dev/null; then
+                  echo "✅ Docker Hub login successful"
+                elif echo "${{ secrets.DOCKERHUB_TOKEN || '' }}" | (echo "$PASS" | sudo -S docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin) 2>/dev/null; then
+                  echo "✅ Docker Hub login successful (with sudo)"
+                else
+                  echo "⚠️ Docker Hub login failed, continuing anyway"
+                fi
+              else
+                echo "No Docker Hub credentials provided, skipping login"
+              fi
 
-            docker compose up -d "${SERVICE}" \
-            || docker-compose up -d "${SERVICE}" \
-            || (echo "${{ secrets.VPS_PASSWORD }}" | sudo -S docker compose up -d "${SERVICE}") \
-            || (echo "${{ secrets.VPS_PASSWORD }}" | sudo -S docker-compose up -d "${SERVICE}")
+              echo "== Helper functions =="
+              run_docker() {
+                if docker "$@" 2>/dev/null; then
+                  return 0
+                elif echo "$PASS" | sudo -S docker "$@" 2>/dev/null; then
+                  return 0
+                else
+                  return 1
+                fi
+              }
 
-            POST_IMAGE=$(docker ps --filter "name=^/pavillon-api$" --format "{{.Image}}" || true)
-            DATE_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+              run_compose() {
+                if docker compose "$@" 2>/dev/null; then
+                  return 0
+                elif docker-compose "$@" 2>/dev/null; then
+                  return 0
+                elif echo "$PASS" | sudo -S docker compose "$@" 2>/dev/null; then
+                  return 0
+                elif echo "$PASS" | sudo -S docker-compose "$@" 2>/dev/null; then
+                  return 0
+                else
+                  return 1
+                fi
+              }
 
-            echo "::notice title=Deployment::${SERVICE} déployé avec le tag ${{ github.event.inputs.tag }}"
+              echo "== Capture pre-deployment image =="
+              PRE_IMAGE=$(run_docker ps --filter "name=^/pavillon-api$" --format "{{.Image}}" 2>/dev/null || echo "none")
+              echo "PRE_IMAGE=$PRE_IMAGE"
 
-            # Récap en clair dans les logs
-            echo "SERVER=${{ secrets.VPS_HOST }}"
-            echo "SERVICE=${SERVICE}"
-            echo "TAG=${{ github.event.inputs.tag }}"
-            echo "PRE_IMAGE=${PRE_IMAGE}"
-            echo "POST_IMAGE=${POST_IMAGE}"
-            echo "DATE=${DATE_UTC}"
+              echo "== Update .env IMAGE_TAG =="
+              if [ -f .env ]; then
+                echo "Found existing .env file"
+                if grep -q "^IMAGE_TAG=" .env; then
+                  sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=${{ github.event.inputs.tag }}/" .env
+                  echo "✅ Updated existing IMAGE_TAG in .env"
+                else
+                  echo "IMAGE_TAG=${{ github.event.inputs.tag }}" >> .env
+                  echo "✅ Added IMAGE_TAG to existing .env"
+                fi
+              else
+                echo "IMAGE_TAG=${{ github.event.inputs.tag }}" > .env
+                echo "✅ Created new .env with IMAGE_TAG"
+              fi
+              
+              echo "Current .env content:"
+              cat .env
+              echo "--- end of .env ---"
 
-            # Nettoyage images obsolètes (optionnel)
-            docker image prune -f \
-            || (echo "${{ secrets.VPS_PASSWORD }}" | sudo -S docker image prune -f)
+              echo "== Pull & Deploy service: ${SERVICE} =="
+              echo "Pulling latest image for ${SERVICE}..."
+              if ! run_compose pull "${SERVICE}"; then
+                echo "❌ Failed to pull image for ${SERVICE}"
+                exit 13
+              fi
+              echo "✅ Image pulled successfully"
+
+              echo "Starting/updating ${SERVICE}..."
+              if ! run_compose up -d "${SERVICE}"; then
+                echo "❌ Failed to start/update ${SERVICE}"
+                exit 14
+              fi
+              echo "✅ Service ${SERVICE} started/updated successfully"
+
+              echo "== Capture post-deployment image =="
+              sleep 3  # Wait a moment for container to start
+              POST_IMAGE=$(run_docker ps --filter "name=^/pavillon-api$" --format "{{.Image}}" 2>/dev/null || echo "none")
+              echo "POST_IMAGE=$POST_IMAGE"
+
+              echo "== Deployment summary =="
+              DATE_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+              echo "::notice title=Deployment::${SERVICE} déployé avec le tag ${{ github.event.inputs.tag }}"
+              
+              echo "========================================="
+              echo "🚀 DEPLOYMENT SUMMARY"
+              echo "========================================="
+              echo "SERVER=${{ secrets.VPS_HOST }}"
+              echo "SERVICE=${SERVICE}"
+              echo "TAG=${{ github.event.inputs.tag }}"
+              echo "PRE_IMAGE=${PRE_IMAGE}"
+              echo "POST_IMAGE=${POST_IMAGE}"
+              echo "DATE=${DATE_UTC}"
+              echo "DEPLOY_DIR=${DEPLOY_DIR}"
+              echo "========================================="
+
+              echo "== Cleanup old images =="
+              if run_docker image prune -f; then
+                echo "✅ Image cleanup completed"
+              else
+                echo "⚠️ Image cleanup failed, but deployment was successful"
+              fi
+
+              echo "== Final status check =="
+              echo "Container status:"
+              run_docker ps --filter "name=pavillon-api" --format "table {{.Names}}\\t{{.Status}}\\t{{.Image}}" || echo "Could not get container status"
+              
+              echo "✅ Deployment completed successfully!"
+            '
 
       - name: Publish Job Summary
         run: |
