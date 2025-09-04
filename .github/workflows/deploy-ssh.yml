@@ -61,8 +61,9 @@ jobs:
             bash -lc '
               set -euxo pipefail
               set -x
-              SERVICE="${SERVICE:-api}"
-              DEPLOY_DIR="${DEPLOY_DIR}"
+              SERVICE="${{ env.SERVICE }}"
+              DEPLOY_DIR="${{ env.DEPLOY_DIR }}"
+              IMAGE_TAG="${{ github.event.inputs.tag }}"
               PASS="${{ secrets.VPS_PASSWORD }}"
 
               echo "== Check directory =="
@@ -159,14 +160,14 @@ jobs:
               if [ -f .env ]; then
                 echo "Found existing .env file"
                 if grep -q "^IMAGE_TAG=" .env; then
-                  sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=${{ github.event.inputs.tag }}/" .env
+                  sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=${IMAGE_TAG}/" .env
                   echo "✅ Updated existing IMAGE_TAG in .env"
                 else
-                  echo "IMAGE_TAG=${{ github.event.inputs.tag }}" >> .env
+                  echo "IMAGE_TAG=${IMAGE_TAG}" >> .env
                   echo "✅ Added IMAGE_TAG to existing .env"
                 fi
               else
-                echo "IMAGE_TAG=${{ github.event.inputs.tag }}" > .env
+                echo "IMAGE_TAG=${IMAGE_TAG}" > .env
                 echo "✅ Created new .env with IMAGE_TAG"
               fi
               
@@ -196,14 +197,14 @@ jobs:
 
               echo "== Deployment summary =="
               DATE_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-              echo "::notice title=Deployment::${SERVICE} déployé avec le tag ${{ github.event.inputs.tag }}"
+              echo "::notice title=Deployment::${SERVICE} déployé avec le tag ${IMAGE_TAG}"
               
               echo "========================================="
               echo "🚀 DEPLOYMENT SUMMARY"
               echo "========================================="
               echo "SERVER=${{ secrets.VPS_HOST }}"
               echo "SERVICE=${SERVICE}"
-              echo "TAG=${{ github.event.inputs.tag }}"
+              echo "TAG=${IMAGE_TAG}"
               echo "PRE_IMAGE=${PRE_IMAGE}"
               echo "POST_IMAGE=${POST_IMAGE}"
               echo "DATE=${DATE_UTC}"
