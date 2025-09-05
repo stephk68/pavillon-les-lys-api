@@ -50,10 +50,17 @@ COPY --from=builder --chown=nestjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nestjs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nestjs:nodejs /app/dist ./dist
 
+# Copy entrypoint script
+COPY --chown=nestjs:nodejs docker-entrypoint.sh ./
+USER root
+RUN chmod +x docker-entrypoint.sh
+USER nestjs
+
 # Healthcheck against the Nest health endpoint (adjust if different)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=5 \
   CMD wget -qO- http://localhost:3000/health | grep -q 'status' || exit 1
 
 EXPOSE 3000
 
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["node", "dist/main.js"]

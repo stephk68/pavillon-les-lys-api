@@ -128,7 +128,23 @@ jobs:
 
             # Attendre un peu pour que le container démarre
             echo "⏳ Waiting for container to start..."
-            sleep 5
+            sleep 10
+
+            # Exécuter les migrations Prisma
+            echo "🗄️ Running Prisma migrations..."
+            if run_docker exec pavillon-api npx prisma migrate deploy; then
+              echo "✅ Migrations executed successfully"
+            else
+              echo "⚠️ Migrations failed or no migrations to apply"
+            fi
+
+            # Exécuter le seed des données par défaut
+            echo "🌱 Running database seed..."
+            if run_docker exec pavillon-api npm run seed; then
+              echo "✅ Database seeded successfully"
+            else
+              echo "⚠️ Seed failed or data already exists"
+            fi
 
             # Vérifier le statut
             echo "📊 Container status:"
