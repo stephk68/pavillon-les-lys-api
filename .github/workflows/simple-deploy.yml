@@ -56,36 +56,98 @@ jobs:
           script: |
             echo "🔄 Starting deployment..."
 
+            # Variables
+            TAG="${{ github.event.inputs.tag || 'latest' }}"
+            PASS="${{ secrets.VPS_PASSWORD }}"
+
             # Aller dans le dossier du projet
             cd /home/sk_aymeric/pavillon-lys-api
+            echo "📁 Working directory: $(pwd)"
+
+            # Fonctions helper pour Docker
+            run_docker() {
+              if docker "$@" 2>/dev/null; then
+                return 0
+              elif echo "$PASS" | sudo -S docker "$@" 2>/dev/null; then
+                return 0
+              else
+                echo "❌ Docker command failed: docker $*"
+                return 1
+              fi
+            }
+
+            run_compose() {
+              if docker compose "$@" 2>/dev/null; then
+                return 0
+              elif docker-compose "$@" 2>/dev/null; then
+                return 0
+              elif echo "$PASS" | sudo -S docker compose "$@" 2>/dev/null; then
+                return 0
+              elif echo "$PASS" | sudo -S docker-compose "$@" 2>/dev/null; then
+                return 0
+              else
+                echo "❌ Docker Compose command failed: $*"
+                return 1
+              fi
+            }
 
             # Mettre à jour le tag d'image dans .env
-            TAG="${{ github.event.inputs.tag || 'latest' }}"
+            echo "🔧 Updating IMAGE_TAG to: $TAG"
             if [ -f .env ]; then
-              sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=$TAG/" .env || echo "IMAGE_TAG=$TAG" >> .env
+              if grep -q "^IMAGE_TAG=" .env; then
+                sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=$TAG/" .env
+                echo "✅ Updated existing IMAGE_TAG in .env"
+              else
+                echo "IMAGE_TAG=$TAG" >> .env
+                echo "✅ Added IMAGE_TAG to existing .env"
+              fi
             else
               echo "IMAGE_TAG=$TAG" > .env
+              echo "✅ Created new .env with IMAGE_TAG"
             fi
 
-            echo "📋 Contenu du .env:"
+            echo "📋 Current .env content:"
             cat .env
+            echo "------------------------"
 
             # Pull de la nouvelle image
-            echo "📥 Pulling new image..."
-            docker-compose pull ${{ env.SERVICE_NAME }} || sudo docker-compose pull ${{ env.SERVICE_NAME }}
+            echo "📥 Pulling new image: ${{ env.DOCKER_IMAGE }}:$TAG"
+            if ! run_compose pull ${{ env.SERVICE_NAME }}; then
+              echo "❌ Failed to pull image"
+              exit 1
+            fi
+            echo "✅ Image pulled successfully"
 
             # Redémarrer le service
-            echo "🔄 Restarting service..."
-            docker-compose up -d ${{ env.SERVICE_NAME }} || sudo docker-compose up -d ${{ env.SERVICE_NAME }}
+            echo "🔄 Restarting service: ${{ env.SERVICE_NAME }}"
+            if ! run_compose up -d ${{ env.SERVICE_NAME }}; then
+              echo "❌ Failed to restart service"
+              exit 1
+            fi
+            echo "✅ Service restarted successfully"
+
+            # Attendre un peu pour que le container démarre
+            echo "⏳ Waiting for container to start..."
+            sleep 5
 
             # Vérifier le statut
-            echo "✅ Deployment completed!"
             echo "📊 Container status:"
-            docker ps --filter "name=pavillon" || sudo docker ps --filter "name=pavillon"
+            run_docker ps --filter "name=pavillon" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}"
+
+            # Vérifier que le nouveau tag est bien utilisé
+            CURRENT_IMAGE=$(run_docker ps --filter "name=pavillon-api" --format "{{.Image}}" | head -1)
+            echo "🏷️ Current running image: $CURRENT_IMAGE"
+            if [[ "$CURRENT_IMAGE" == *"$TAG"* ]]; then
+              echo "✅ New tag is running correctly!"
+            else
+              echo "⚠️ Warning: Expected tag $TAG but got $CURRENT_IMAGE"
+            fi
 
             # Nettoyer les images inutiles
-            echo "🧹 Cleaning up..."
-            docker image prune -f || sudo docker image prune -f || true
+            echo "🧹 Cleaning up old images..."
+            run_docker image prune -f || true
+
+            echo "✅ Deployment completed successfully!"
 
       - name: 📋 Job Summary
         run: |
