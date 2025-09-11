@@ -34,23 +34,26 @@ model User {
 }
 
 model Reservation {
-  id        String            @id @default(uuid())
-  user      User              @relation(fields: [userId], references: [id])
-  userId    String
-  eventType EventType
-  start     DateTime
-  end       DateTime
-  attendees Int
-  status    ReservationStatus @default(PENDING)
-  quoteId   String?           @unique
-  quote     Quote?            @relation(fields: [quoteId], references: [id])
-  payments  Payment[]
-  checklist ChecklistItem[]
-  Feedback  Feedback[]
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
-  createdBy String?
-  updatedBy String?
+  id              String            @id @default(uuid())
+  user            User              @relation(fields: [userId], references: [id])
+  userId          String
+  eventType       EventType
+  start           DateTime
+  end             DateTime
+  attendees       Int
+  status          ReservationStatus @default(PENDING)
+  description     String? // Description de l'événement
+  specialRequests String? // Demandes spéciales
+  estimatedBudget Int? // Budget estimé en francs CFA
+  quoteId         String?           @unique
+  quote           Quote?            @relation(fields: [quoteId], references: [id])
+  payments        Payment[]
+  checklist       ChecklistItem[]
+  Feedback        Feedback[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  createdBy       String?
+  updatedBy       String?
 }
 
 model Payment {

@@ -1,6 +1,7 @@
 import { EventType } from "@prisma/client";
 import {
   IsDateString,
+  IsEmail,
   IsEnum,
   IsInt,
   IsOptional,
@@ -8,7 +9,7 @@ import {
   Min,
 } from "class-validator";
 
-export class CreateReservationDto {
+export class CreateReservationBackOfficeDto {
   @IsEnum(EventType)
   eventType: EventType;
 
@@ -22,7 +23,20 @@ export class CreateReservationDto {
   @Min(1)
   attendees: number;
 
-  // Champs optionnels pour enrichir la réservation
+  // Informations client pour le back-office
+  @IsEmail()
+  clientEmail: string;
+
+  @IsString()
+  clientFirstName: string;
+
+  @IsString()
+  clientLastName: string;
+
+  @IsString()
+  clientPhone: string;
+
+  // Champs optionnels pour la réservation
   @IsOptional()
   @IsString()
   description?: string;

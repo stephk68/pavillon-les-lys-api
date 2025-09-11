@@ -66,11 +66,10 @@ services:
       JWT_EXPIRES_IN: 24h
       NODE_ENV: production
       PORT: 3000
-      SMTP_HOST: smtp.example.com
-      SMTP_PORT: 587
-      SMTP_USER: smtp_user
-      SMTP_PASS: smtp_password
-      FROM_EMAIL: noreply@pavillon-les-lys.fr
+      # Email Configuration (Gmail SMTP)
+      SMTP_USER: stephanek1996@gmail.com
+      SMTP_PASSWORD: bgeq dttf nidb fhag
+      FRONTEND_URL: http://localhost:3001
     ports:
       - "3000:3000"
     networks:

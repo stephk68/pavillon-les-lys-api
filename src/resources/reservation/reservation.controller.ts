@@ -12,42 +12,56 @@ import {
   Post,
   Query,
   UseGuards,
-} from '@nestjs/common';
-import { EventType, ReservationStatus, Role } from '@prisma/client';
-import { Roles } from 'src/common/decorators/permission.decorator';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { Public } from '../../common/decorators/public.decorator';
-import { AuthenticationGuard } from '../../common/guards/authentication.guard';
-import { AuthorizationGuard } from '../../common/guards/authorization.guard';
-import { CreateReservationDto } from './dto/create-reservation.dto';
-import { UpdateReservationDto } from './dto/update-reservation.dto';
-import { ReservationService } from './reservation.service';
+} from "@nestjs/common";
+import { EventType, ReservationStatus, Role } from "@prisma/client";
+import { Roles } from "src/common/decorators/permission.decorator";
+import { CurrentUser } from "../../common/decorators/current-user.decorator";
+import { Public } from "../../common/decorators/public.decorator";
+import { AuthenticationGuard } from "../../common/guards/authentication.guard";
+import { AuthorizationGuard } from "../../common/guards/authorization.guard";
+import { CreateReservationBackOfficeDto } from "./dto/create-reservation-backoffice.dto";
+import { CreateReservationDto } from "./dto/create-reservation.dto";
+import { UpdateReservationDto } from "./dto/update-reservation.dto";
+import { ReservationService } from "./reservation.service";
 
-@Controller('reservations')
+@Controller("reservations")
 @UseGuards(AuthenticationGuard, AuthorizationGuard)
 export class ReservationController {
   constructor(private readonly reservationService: ReservationService) {}
 
-  // Utilisateurs authentifiés peuvent créer une réservation
+  // Utilisateurs authentifiés peuvent créer une réservation (front-office)
   @Post()
   async create(
     @Body() createReservationDto: CreateReservationDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: any
   ) {
     return this.reservationService.create(createReservationDto, user.id);
+  }
+
+  // Staff peut créer une réservation avec infos client (back-office)
+  @Roles(Role.ADMIN, Role.EVENT_MANAGER)
+  @Post("back-office")
+  async createFromBackOffice(
+    @Body() createReservationDto: CreateReservationBackOfficeDto,
+    @CurrentUser() user: any
+  ) {
+    return this.reservationService.createFromBackOffice(
+      createReservationDto,
+      user.id
+    );
   }
 
   // Admins et staff peuvent voir toutes les réservations, clients voient seulement les leurs
   @Get()
   async findAll(
     @CurrentUser() user: any,
-    @Query('status') status?: ReservationStatus,
-    @Query('eventType') eventType?: EventType,
-    @Query('userId') userId?: string,
-    @Query('skip') skip?: string,
-    @Query('take') take?: string,
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string,
+    @Query("status") status?: ReservationStatus,
+    @Query("eventType") eventType?: EventType,
+    @Query("userId") userId?: string,
+    @Query("skip") skip?: string,
+    @Query("take") take?: string,
+    @Query("startDate") startDate?: string,
+    @Query("endDate") endDate?: string
   ) {
     const options = {
       status,
@@ -64,60 +78,74 @@ export class ReservationController {
 
   // Route publique pour vérifier la disponibilité
   @Public()
-  @Get('availability')
+  @Get("availability")
   async checkAvailability(
-    @Query('start') start: string,
-    @Query('end') end: string,
-    @Query('excludeId') excludeId?: string,
+    @Query("start") start: string,
+    @Query("end") end: string,
+    @Query("excludeId") excludeId?: string
   ) {
     const isAvailable = await this.reservationService.checkAvailability(
       new Date(start),
       new Date(end),
-      excludeId,
+      excludeId
     );
     return { available: isAvailable };
   }
 
   // Route publique pour obtenir les créneaux disponibles
   @Public()
-  @Get('available-slots')
-  async getAvailableSlots(@Query('date') date: string) {
+  @Get("available-slots")
+  async getAvailableSlots(@Query("date") date: string) {
     return this.reservationService.getAvailableSlots(new Date(date));
+  }
+
+  // Route de debug pour analyser la disponibilité (Development only)
+  @Public()
+  @Get("debug-availability")
+  async debugAvailability(
+    @Query("start") start: string,
+    @Query("end") end: string,
+    @Query("excludeId") excludeId?: string
+  ) {
+    return this.reservationService.debugAvailability(
+      new Date(start),
+      new Date(end)
+    );
   }
 
   // Admins et staff peuvent voir les statistiques
   @Roles(Role.ADMIN, Role.EVENT_MANAGER)
-  @Get('stats')
+  @Get("stats")
   async getStats() {
     return this.reservationService.getReservationStats();
   }
 
   // Admins et staff peuvent voir les réservations à venir
   @Roles(Role.ADMIN, Role.EVENT_MANAGER)
-  @Get('upcoming')
-  async getUpcoming(@Query('days') days?: string) {
+  @Get("upcoming")
+  async getUpcoming(@Query("days") days?: string) {
     const daysNumber = days ? parseInt(days, 10) : 7;
     return this.reservationService.getUpcomingReservations(daysNumber);
   }
 
   // Utilisateurs peuvent voir leurs propres réservations
-  @Get('my-reservations')
+  @Get("my-reservations")
   async getMyReservations(@CurrentUser() user: any) {
     return this.reservationService.getUserReservations(user.id);
   }
 
   // Admins et staff peuvent voir les réservations d'un utilisateur spécifique
   @Roles(Role.ADMIN, Role.EVENT_MANAGER)
-  @Get('user/:userId')
-  async getUserReservations(@Param('userId', ParseUUIDPipe) userId: string) {
+  @Get("user/:userId")
+  async getUserReservations(@Param("userId", ParseUUIDPipe) userId: string) {
     return this.reservationService.getUserReservations(userId);
   }
 
   // Utilisateurs peuvent voir leurs réservations, admins et staff peuvent voir toutes
-  @Get(':id')
+  @Get(":id")
   async findOne(
-    @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: any,
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentUser() user: any
   ) {
     const reservation = await this.reservationService.findOne(id);
     // Vérifier les permissions
@@ -130,11 +158,11 @@ export class ReservationController {
 
   // Utilisateurs peuvent modifier leurs réservations, admins et staff peuvent modifier toutes
   // Utilisateurs peuvent modifier leurs réservations, admins et staff peuvent modifier toutes
-  @Patch(':id')
+  @Patch(":id")
   async update(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param("id", ParseUUIDPipe) id: string,
     @Body() updateReservationDto: UpdateReservationDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: any
   ) {
     const reservation = await this.reservationService.findOne(id);
     // Vérifier les permissions
@@ -151,18 +179,18 @@ export class ReservationController {
   }
   // Seuls les admins et staff peuvent confirmer une réservation
   @Roles(Role.ADMIN, Role.EVENT_MANAGER)
-  @Patch(':id/confirm')
+  @Patch(":id/confirm")
   @HttpCode(HttpStatus.OK)
-  async confirm(@Param('id', ParseUUIDPipe) id: string) {
+  async confirm(@Param("id", ParseUUIDPipe) id: string) {
     return this.reservationService.confirm(id);
   }
 
   // Utilisateurs peuvent annuler leurs réservations, admins et staff peuvent annuler toutes
-  @Patch(':id/cancel')
+  @Patch(":id/cancel")
   @HttpCode(HttpStatus.OK)
   async cancel(
-    @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: any,
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentUser() user: any
   ) {
     const userId = user.role === Role.CLIENT ? user.id : undefined;
     return this.reservationService.cancel(id, userId);
@@ -170,28 +198,28 @@ export class ReservationController {
 
   // Seuls les admins et staff peuvent marquer comme terminé
   @Roles(Role.ADMIN, Role.EVENT_MANAGER)
-  @Patch(':id/complete')
+  @Patch(":id/complete")
   @HttpCode(HttpStatus.OK)
-  async complete(@Param('id', ParseUUIDPipe) id: string) {
+  async complete(@Param("id", ParseUUIDPipe) id: string) {
     return this.reservationService.complete(id);
   }
 
   // Seuls les admins et staff peuvent changer le statut directement
   @Roles(Role.ADMIN, Role.EVENT_MANAGER)
-  @Patch(':id/status')
+  @Patch(":id/status")
   @HttpCode(HttpStatus.OK)
   async updateStatus(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body('status') status: ReservationStatus,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body("status") status: ReservationStatus
   ) {
     return this.reservationService.updateStatus(id, status);
   }
 
   // Seuls les admins peuvent supprimer une réservation
   @Roles(Role.ADMIN)
-  @Delete(':id')
+  @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id', ParseUUIDPipe) id: string) {
+  async remove(@Param("id", ParseUUIDPipe) id: string) {
     await this.reservationService.remove(id);
   }
 }
