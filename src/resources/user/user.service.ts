@@ -113,33 +113,41 @@ export class UserService {
     return user;
   }
 
-  async findAll(options?: {
-    role?: Role;
-    skip?: number;
-    take?: number;
-  }): Promise<Omit<User, "password">[]> {
+  async findAll(options?: { role?: Role; skip?: number; take?: number }) {
     const { role, skip = 0, take = 50 } = options || {};
 
-    return this.prisma.user.findMany({
-      where: role ? { role } : undefined,
+    const where = role ? { role } : undefined;
+
+    const [data, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        skip,
+        take,
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          role: true,
+          isFirstLogin: true,
+          lastLoginAt: true,
+          createdAt: true,
+          updatedAt: true,
+          createdBy: true,
+          updatedBy: true,
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return {
+      data,
+      total,
       skip,
       take,
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        phone: true,
-        role: true,
-        isFirstLogin: true,
-        lastLoginAt: true,
-        createdAt: true,
-        updatedAt: true,
-        createdBy: true,
-        updatedBy: true,
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    };
   }
 
   async findOne(id: string): Promise<Omit<User, "password">> {
@@ -333,7 +341,7 @@ export class UserService {
     });
   }
 
-  async getUsersByRole(role: Role): Promise<Omit<User, "password">[]> {
+  async getUsersByRole(role: Role) {
     return this.findAll({ role });
   }
 

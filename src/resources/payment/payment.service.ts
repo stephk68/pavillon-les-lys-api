@@ -3,32 +3,37 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
-} from '@nestjs/common';
-import { Payment, PaymentStatus, PaymentType } from '@prisma/client';
-import { PrismaService } from '../../common/services/prisma.service';
-import { ReservationService } from '../reservation/reservation.service';
-import { CreatePaymentDto } from './dto/create-payment.dto';
-import { UpdatePaymentDto } from './dto/update-payment.dto';
+} from "@nestjs/common";
+import { Payment, PaymentStatus, PaymentType, Role } from "@prisma/client";
+import { PrismaService } from "../../common/services/prisma.service";
+import { ReservationService } from "../reservation/reservation.service";
+import { CreatePaymentDto } from "./dto/create-payment.dto";
+import { UpdatePaymentDto } from "./dto/update-payment.dto";
 
 @Injectable()
 export class PaymentService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly reservationService: ReservationService,
+    private readonly reservationService: ReservationService
   ) {}
 
   async create(
     createPaymentDto: CreatePaymentDto,
-    userId: string,
+    user: any
   ): Promise<Payment> {
-    // Vérifier que la réservation existe et appartient à l'utilisateur
+    // Vérifier que la réservation existe
     const reservation = await this.reservationService.findOne(
-      createPaymentDto.reservationId,
+      createPaymentDto.reservationId
     );
 
-    if (reservation.userId !== userId) {
+    // Seuls les admins et EVENT_MANAGER peuvent créer des paiements pour d'autres utilisateurs
+    if (
+      reservation.userId !== user.id &&
+      user.role !== Role.ADMIN &&
+      user.role !== Role.EVENT_MANAGER
+    ) {
       throw new BadRequestException(
-        'Vous ne pouvez payer que vos propres réservations',
+        "Vous ne pouvez payer que vos propres réservations"
       );
     }
 
@@ -41,14 +46,14 @@ export class PaymentService {
     });
 
     if (existingPayment) {
-      throw new ConflictException('Cette réservation a déjà été payée');
+      throw new ConflictException("Cette réservation a déjà été payée");
     }
 
-    // Créer le paiement
+    // Créer le paiement avec l'userId de la réservation (pas de l'admin qui crée)
     const payment = await this.prisma.payment.create({
       data: {
         ...createPaymentDto,
-        userId,
+        userId: reservation.userId, // Utiliser l'userId de la réservation
         status: PaymentStatus.PENDING,
         paidAt: new Date(),
       },
@@ -105,36 +110,46 @@ export class PaymentService {
     if (reservationId) where.reservationId = reservationId;
 
     if (startDate || endDate) {
-      where.paymentDate = {};
-      if (startDate) where.paymentDate.gte = startDate;
-      if (endDate) where.paymentDate.lte = endDate;
+      where.paidAt = {};
+      if (startDate) where.paidAt.gte = startDate;
+      if (endDate) where.paidAt.lte = endDate;
     }
 
-    return this.prisma.payment.findMany({
-      where,
+    const [data, total] = await Promise.all([
+      this.prisma.payment.findMany({
+        where,
+        skip,
+        take,
+        include: {
+          User: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+          reservation: {
+            select: {
+              id: true,
+              eventType: true,
+              start: true,
+              end: true,
+              attendees: true,
+            },
+          },
+        },
+        orderBy: { paidAt: "desc" },
+      }),
+      this.prisma.payment.count({ where }),
+    ]);
+
+    return {
+      data,
+      total,
       skip,
       take,
-      include: {
-        User: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        reservation: {
-          select: {
-            id: true,
-            eventType: true,
-            start: true,
-            end: true,
-            attendees: true,
-          },
-        },
-      },
-      orderBy: { paidAt: 'desc' },
-    });
+    };
   }
 
   async findOne(id: string): Promise<Payment> {
@@ -171,7 +186,7 @@ export class PaymentService {
 
   async update(
     id: string,
-    updatePaymentDto: UpdatePaymentDto,
+    updatePaymentDto: UpdatePaymentDto
   ): Promise<Payment> {
     // Vérifier que le paiement existe
     await this.findOne(id);
@@ -255,7 +270,7 @@ export class PaymentService {
 
     if (payment.status !== PaymentStatus.PAID) {
       throw new BadRequestException(
-        'Seuls les paiements validés peuvent être remboursés',
+        "Seuls les paiements validés peuvent être remboursés"
       );
     }
 
@@ -273,7 +288,7 @@ export class PaymentService {
 
     if (payment.status === PaymentStatus.PAID) {
       throw new BadRequestException(
-        'Impossible de supprimer un paiement validé',
+        "Impossible de supprimer un paiement validé"
       );
     }
 
@@ -282,17 +297,17 @@ export class PaymentService {
     });
   }
 
-  async getUserPayments(userId: string): Promise<Payment[]> {
+  async getUserPayments(userId: string) {
     return this.findAll({ userId });
   }
 
-  async getReservationPayments(reservationId: string): Promise<Payment[]> {
+  async getReservationPayments(reservationId: string) {
     return this.findAll({ reservationId });
   }
 
   async getPaymentStats() {
     const stats = await this.prisma.payment.groupBy({
-      by: ['status'],
+      by: ["status"],
       _count: true,
       _sum: {
         amount: true,
@@ -337,23 +352,23 @@ export class PaymentService {
     };
   }
 
-  async getPendingPayments(): Promise<Payment[]> {
+  async getPendingPayments() {
     return this.findAll({ status: PaymentStatus.PENDING });
   }
 
-  async getFailedPayments(): Promise<Payment[]> {
+  async getFailedPayments() {
     return this.findAll({ status: PaymentStatus.REFUNDED });
   }
 
   // Simulation de traitement de paiement (à remplacer par votre gateway)
   async processPayment(
     paymentId: string,
-    paymentMethod: any,
+    paymentMethod: any
   ): Promise<Payment> {
     const payment = await this.findOne(paymentId);
 
     if (payment.status !== PaymentStatus.PENDING) {
-      throw new BadRequestException('Ce paiement ne peut pas être traité');
+      throw new BadRequestException("Ce paiement ne peut pas être traité");
     }
 
     try {
@@ -366,7 +381,7 @@ export class PaymentService {
       return this.markAsPaid(paymentId);
     } catch (error) {
       await this.markAsFailed(paymentId);
-      throw new BadRequestException('Échec du traitement du paiement');
+      throw new BadRequestException("Échec du traitement du paiement");
     }
   }
 
@@ -375,7 +390,7 @@ export class PaymentService {
 
     if (payment.status !== PaymentStatus.PAID) {
       throw new BadRequestException(
-        'Une facture ne peut être générée que pour un paiement validé',
+        "Une facture ne peut être générée que pour un paiement validé"
       );
     }
 
@@ -391,16 +406,16 @@ export class PaymentService {
     });
 
     if (!customer) {
-      throw new NotFoundException('Client non trouvé pour ce paiement');
+      throw new NotFoundException("Client non trouvé pour ce paiement");
     }
 
     // Information de la réservation associée
     const reservation = await this.reservationService.findOne(
-      payment.reservationId,
+      payment.reservationId
     );
 
     if (!reservation) {
-      throw new NotFoundException('Réservation non trouvée pour ce paiement');
+      throw new NotFoundException("Réservation non trouvée pour ce paiement");
     }
 
     // Logique de génération de facture

@@ -1,59 +1,45 @@
-## Robust multi-stage Dockerfile for Pavillon Les Lys API (NestJS + Prisma)
-# Stage 1: Dependencies and build
-FROM node:20.13.0-alpine AS builder
+# ============================================
+# API Pavillon Les Lys - NestJS + Prisma
+# ============================================
 
-# System deps for node-gyp/native modules and openssl
-RUN apk add --no-cache libc6-compat openssl python3 make g++ wget
+FROM node:20-alpine
 
+# Installer les dépendances système nécessaires
+RUN apk add --no-cache \
+    libc6-compat \
+    openssl \
+    python3 \
+    make \
+    g++ \
+    wget \
+    && rm -rf /var/cache/apk/*
+
+# Créer le répertoire de travail
 WORKDIR /app
 
-# Use Yarn if present; install Yarn 1.x only if missing
-RUN yarn --version || (npm install -g yarn@1.22.22 && yarn --version)
-
-# Copy manifests first to leverage Docker cache for dependency install
+# Copier les fichiers de dépendances
 COPY package.json yarn.lock ./
 
-# Install all deps (dev included) for build
-RUN yarn install --frozen-lockfile
+# Installer les dépendances
+RUN yarn install --frozen-lockfile --production=false
 
-# Copy the rest of the project (filtered by .dockerignore)
+# Copier le code source
 COPY . .
 
-# Generate Prisma client (requires schema and node_modules)
+# Générer le client Prisma
 RUN npx prisma generate
 
-# Build NestJS (outputs to dist/)
-RUN yarn build
+# Créer un utilisateur non-root pour la sécurité
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nestjs -u 1001 -G nodejs
 
-# Prepare production node_modules
-RUN rm -rf node_modules && \
-  YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install --frozen-lockfile --production && \
-  yarn cache clean
-
-# Stage 2: Production runtime image
-FROM node:20.13.0-alpine AS runner
-
-# Minimal system deps for SSL
-RUN apk add --no-cache libc6-compat openssl wget
-
-# Create non-root user
-RUN addgroup -S nodejs && adduser -S nestjs -G nodejs
+# Changer les permissions
+RUN chown -R nestjs:nodejs /app
 USER nestjs
-WORKDIR /app
 
-ENV NODE_ENV=production \
-    PORT=3000
-
-# Copy runtime artifacts from builder
-COPY --from=builder --chown=nestjs:nodejs /app/package.json ./
-COPY --from=builder --chown=nestjs:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=nestjs:nodejs /app/prisma ./prisma
-COPY --from=builder --chown=nestjs:nodejs /app/dist ./dist
-
-# Healthcheck against the Nest health endpoint (adjust if different)
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=5 \
-  CMD wget -qO- http://localhost:3000/health | grep -q 'status' || exit 1
-
+# Exposer le port
 EXPOSE 3000
 
-CMD ["node", "dist/main.js"]
+# Commande de démarrage
+CMD ["sh", "-c", "yarn start:dev"]
+

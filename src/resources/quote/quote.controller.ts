@@ -3,7 +3,6 @@ import {
   Body,
   Controller,
   Delete,
-  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -13,17 +12,16 @@ import {
   Post,
   Query,
   UseGuards,
-} from '@nestjs/common';
-import { Role } from '@prisma/client';
-import { Roles } from 'src/common/decorators/permission.decorator';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { AuthenticationGuard } from '../../common/guards/authentication.guard';
-import { AuthorizationGuard } from '../../common/guards/authorization.guard';
-import { CreateQuoteDto } from './dto/create-quote.dto';
-import { UpdateQuoteDto } from './dto/update-quote.dto';
-import { QuoteService } from './quote.service';
+} from "@nestjs/common";
+import { QuoteStatus, Role } from "@prisma/client";
+import { Roles } from "src/common/decorators/permission.decorator";
+import { AuthenticationGuard } from "../../common/guards/authentication.guard";
+import { AuthorizationGuard } from "../../common/guards/authorization.guard";
+import { CreateQuoteDto } from "./dto/create-quote.dto";
+import { UpdateQuoteDto } from "./dto/update-quote.dto";
+import { QuoteService } from "./quote.service";
 
-@Controller('quotes')
+@Controller("quotes")
 @UseGuards(AuthenticationGuard, AuthorizationGuard)
 export class QuoteController {
   constructor(private readonly quoteService: QuoteService) {}
@@ -39,148 +37,93 @@ export class QuoteController {
   @Roles(Role.ADMIN, Role.EVENT_MANAGER)
   @Get()
   async findAll(
-    @Query('skip') skip?: string,
-    @Query('take') take?: string,
-    @Query('hasReservation') hasReservation?: string,
+    @Query("skip") skip?: string,
+    @Query("take") take?: string,
+    @Query("status") status?: QuoteStatus,
+    @Query("userId") userId?: string,
+    @Query("startDate") startDate?: string,
+    @Query("endDate") endDate?: string
   ) {
     const options = {
       skip: skip ? parseInt(skip, 10) : undefined,
       take: take ? parseInt(take, 10) : undefined,
-      hasReservation: hasReservation ? hasReservation === 'true' : undefined,
+      status,
+      userId,
+      startDate,
+      endDate,
     };
+
     return this.quoteService.findAll(options);
   }
 
-  // Seuls les admins et staff peuvent voir les statistiques
+  @Get("stats")
   @Roles(Role.ADMIN, Role.EVENT_MANAGER)
-  @Get('stats')
   async getStats() {
     return this.quoteService.getQuoteStats();
   }
 
-  // Obtenir un devis par ID de réservation
+  @Get(":id")
+  async findOne(@Param("id", ParseUUIDPipe) id: string) {
+    return this.quoteService.findOne(id);
+  }
+
+  @Patch(":id")
   @Roles(Role.ADMIN, Role.EVENT_MANAGER)
-  @Get('reservation/:reservationId')
-  async findByReservationId(
-    @Param('reservationId', ParseUUIDPipe) reservationId: string,
-  ) {
-    return this.quoteService.findByReservationId(reservationId);
-  }
-
-  // Détails d'un devis spécifique
-  @Get(':id')
-  async findOne(
-    @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: any,
-  ) {
-    const quote = await this.quoteService.findOne(id);
-
-    // Les clients ne peuvent voir que les devis de leurs réservations
-    if (user.role === Role.CLIENT) {
-      if (!quote.reservation || quote.reservation.userId !== user.id) {
-        throw new ForbiddenException();
-      }
-    }
-
-    return quote;
-  }
-
-  // Exporter un devis
-  @Get(':id/export')
-  async exportQuote(
-    @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: any,
-  ) {
-    const quote = await this.quoteService.findOne(id);
-
-    // Vérifier les permissions
-    if (user.role === Role.CLIENT) {
-      if (!quote.use || quote.reservation.userId !== user.id) {
-        throw new ForbiddenException();
-      }
-    }
-
-    return this.quoteService.exportQuote(id);
-  }
-
-  // Seuls les admins et staff peuvent modifier les devis
-  @Roles(Role.ADMIN, Role.EVENT_MANAGER)
-  @Patch(':id')
   async update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() updateQuoteDto: UpdateQuoteDto,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() updateQuoteDto: UpdateQuoteDto
   ) {
     return this.quoteService.update(id, updateQuoteDto);
   }
 
-  // Dupliquer un devis
+  @Delete(":id")
+  @Roles(Role.ADMIN)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async remove(@Param("id", ParseUUIDPipe) id: string) {
+    await this.quoteService.delete(id);
+  }
+
+  @Post(":id/duplicate")
   @Roles(Role.ADMIN, Role.EVENT_MANAGER)
-  @Post(':id/duplicate')
-  async duplicate(@Param('id', ParseUUIDPipe) id: string) {
+  async duplicate(@Param("id", ParseUUIDPipe) id: string) {
     return this.quoteService.duplicate(id);
   }
 
-  // Lier un devis à une réservation
+  @Post(":id/send")
   @Roles(Role.ADMIN, Role.EVENT_MANAGER)
-  @Patch(':id/link-reservation/:reservationId')
-  @HttpCode(HttpStatus.OK)
-  async linkToReservation(
-    @Param('id', ParseUUIDPipe) quoteId: string,
-    @Param('reservationId', ParseUUIDPipe) reservationId: string,
+  async sendQuote(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body("recipientEmail") recipientEmail?: string
   ) {
-    return this.quoteService.linkToReservation(quoteId, reservationId);
+    return this.quoteService.sendQuote(id, recipientEmail);
   }
 
-  // Délier un devis d'une réservation
+  @Patch(":id/approve")
   @Roles(Role.ADMIN, Role.EVENT_MANAGER)
-  @Patch(':id/unlink-reservation')
-  @HttpCode(HttpStatus.OK)
-  async unlinkFromReservation(@Param('id', ParseUUIDPipe) id: string) {
-    return this.quoteService.unlinkFromReservation(id);
+  async approve(@Param("id", ParseUUIDPipe) id: string) {
+    return this.quoteService.approveQuote(id);
   }
 
-  // Ajouter un item au devis
+  @Patch(":id/reject")
   @Roles(Role.ADMIN, Role.EVENT_MANAGER)
-  @Post(':id/items')
-  async addItem(@Param('id', ParseUUIDPipe) id: string, @Body() item: any) {
-    return this.quoteService.addItem(id, item);
-  }
-
-  // Modifier un item du devis
-  @Roles(Role.ADMIN, Role.EVENT_MANAGER)
-  @Patch(':id/items/:itemIndex')
-  async updateItem(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('itemIndex') itemIndex: string,
-    @Body() updatedItem: any,
+  async reject(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body("reason") reason: string
   ) {
-    const index = parseInt(itemIndex, 10);
-    if (isNaN(index)) {
-      throw new BadRequestException();
+    if (!reason) {
+      throw new BadRequestException("La raison du rejet est requise");
     }
-    return this.quoteService.updateItem(id, index, updatedItem);
+    return this.quoteService.rejectQuote(id, reason);
   }
 
-  // Supprimer un item du devis
-  @Roles(Role.ADMIN, Role.EVENT_MANAGER)
-  @Delete(':id/items/:itemIndex')
-  @HttpCode(HttpStatus.OK)
-  async removeItem(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('itemIndex') itemIndex: string,
-  ) {
-    const index = parseInt(itemIndex, 10);
-    if (isNaN(index)) {
-      throw new BadRequestException();
-    }
-    return this.quoteService.removeItem(id, index);
+  @Get(":id/export")
+  async export(@Param("id", ParseUUIDPipe) id: string) {
+    return this.quoteService.exportQuote(id);
   }
 
-  // Seuls les admins peuvent supprimer des devis
-  @Roles(Role.ADMIN)
-  @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id', ParseUUIDPipe) id: string) {
-    await this.quoteService.remove(id);
+  @Get(":id/pdf")
+  async generatePdf(@Param("id", ParseUUIDPipe) id: string) {
+    // TODO: Implémenter la génération de PDF
+    throw new BadRequestException("Génération de PDF non encore implémentée");
   }
 }

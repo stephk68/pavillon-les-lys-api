@@ -27,6 +27,7 @@ model User {
   reservations Reservation[]
   payments     Payment[]
   feedbacks    Feedback[]
+  quotes       Quote[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   createdBy    String?
@@ -34,23 +35,27 @@ model User {
 }
 
 model Reservation {
-  id        String            @id @default(uuid())
-  user      User              @relation(fields: [userId], references: [id])
-  userId    String
-  eventType EventType
-  start     DateTime
-  end       DateTime
-  attendees Int
-  status    ReservationStatus @default(PENDING)
-  quoteId   String?           @unique
-  quote     Quote?            @relation(fields: [quoteId], references: [id])
-  payments  Payment[]
-  checklist ChecklistItem[]
-  Feedback  Feedback[]
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
-  createdBy String?
-  updatedBy String?
+  id                    String                  @id @default(uuid())
+  user                  User                    @relation(fields: [userId], references: [id])
+  userId                String
+  eventType             EventType
+  start                 DateTime
+  end                   DateTime
+  attendees             Int
+  status                ReservationStatus       @default(PENDING)
+  description           String?
+  specialRequests       String?
+  estimatedBudget       Decimal?                @db.Decimal(10, 2)
+  quoteId               String?                 @unique
+  quote                 Quote?                  @relation(fields: [quoteId], references: [id])
+  payments              Payment[]
+  checklist             ChecklistItem[]
+  Feedback              Feedback[]
+  reservationEquipments ReservationEquipment[] // Relation Many-to-Many avec InventoryItem
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  createdBy             String?
+  updatedBy             String?
 }
 
 model Payment {
@@ -72,15 +77,34 @@ model Payment {
 }
 
 model Quote {
-  id          String       @id @default(uuid())
-  reservation Reservation?
-  items       Json
-  totalAmount Decimal      @db.Decimal(10, 2)
-  currency    String       @default("XOF")
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  createdBy   String?
-  updatedBy   String?
+  id            String       @id @default(uuid())
+  number        String       @unique
+  user          User         @relation(fields: [userId], references: [id])
+  userId        String
+  reservation   Reservation?
+  reservationId String?
+  items         QuoteItem[]
+  totalHT       Decimal      @db.Decimal(10, 2)
+  vatRate       Decimal      @default(18.0) @db.Decimal(5, 2)
+  totalTTC      Decimal      @db.Decimal(10, 2)
+  validUntil    DateTime
+  status        QuoteStatus  @default(DRAFT)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  createdBy     String?
+  updatedBy     String?
+}
+
+model QuoteItem {
+  id          String   @id @default(uuid())
+  quote       Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  quoteId     String
+  description String
+  quantity    Int
+  unitPrice   Decimal  @db.Decimal(10, 2)
+  totalPrice  Decimal  @db.Decimal(10, 2)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model ChecklistItem {
@@ -111,6 +135,50 @@ model Feedback {
   updatedBy     String?
 }
 
+// ==================== INVENTORY MANAGEMENT ====================
+
+model InventoryItem {
+  id                    String                  @id @default(uuid())
+  name                  String // Ex: "Chaise Napoléon", "Table Ronde 8 Places"
+  description           String? // Description détaillée
+  image                 String? // URL de l'image
+  type                  InventoryItemType // INTERNAL (notre matériel) | EXTERNAL_PROVIDER (prestataire)
+  category              String? // Ex: "Mobilier", "Décoration", "Sonorisation"
+  providerName          String? // Nom du prestataire (si type = EXTERNAL_PROVIDER)
+  providerContact       String? // Email/Téléphone du prestataire
+  totalStock            Int                     @default(0) // Stock total (uniquement pour INTERNAL)
+  availableStock        Int                     @default(0) // Stock disponible (calculé)
+  status                InventoryItemStatus     @default(AVAILABLE) // AVAILABLE | MAINTENANCE | LOST
+  unitPrice             Decimal?                @db.Decimal(10, 2) // Prix unitaire (optionnel)
+  reservationEquipments ReservationEquipment[] // Relation Many-to-Many avec Reservation
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  createdBy             String?
+  updatedBy             String?
+
+  @@index([type, status]) // Index pour filtrer rapidement
+  @@index([category])
+}
+
+model ReservationEquipment {
+  id               String        @id @default(uuid())
+  reservation      Reservation   @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  reservationId    String
+  inventoryItem    InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  inventoryItemId  String
+  quantityReserved Int // Quantité sortie pour cet événement
+  returnedQuantity Int           @default(0) // Quantité rendue (pour gérer la casse/perte)
+  notes            String? // Notes sur l'état du matériel (dégâts, etc.)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@unique([reservationId, inventoryItemId]) // Un item ne peut être lié qu'une fois par réservation
+  @@index([reservationId])
+  @@index([inventoryItemId])
+}
+
+// ==================== ENUMS ====================
+
 enum Role {
   ADMIN
   EVENT_MANAGER
@@ -136,9 +204,27 @@ enum PaymentStatus {
   REFUNDED
 }
 
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+}
+
 enum EventType {
   MARIAGE
   ANNIVERSAIRE
   PROFESSIONNEL
   AUTRE
+}
+
+enum InventoryItemType {
+  INTERNAL          // Matériel en interne (propriété de la salle)
+  EXTERNAL_PROVIDER // Matériel fourni par un prestataire externe
+}
+
+enum InventoryItemStatus {
+  AVAILABLE   // Disponible à la location
+  MAINTENANCE // En maintenance/réparation
+  LOST        // Perdu/Cassé (plus disponible)
 }

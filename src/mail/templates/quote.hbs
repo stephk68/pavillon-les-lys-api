@@ -1,0 +1,319 @@
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Votre Devis - Pavillon Les Lys</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #0a0a0a;
+        color: #f5f5f5;
+        line-height: 1.6;
+      }
+      .email-container {
+        max-width: 600px;
+        margin: 0 auto;
+        background-color: #1a1a1a;
+        border: 1px solid #2d2d2d;
+      }
+      .header {
+        background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+        padding: 40px 30px;
+        text-align: center;
+        border-bottom: 2px solid #d4af37;
+      }
+      .logo {
+        font-size: 28px;
+        font-weight: bold;
+        color: #d4af37;
+        letter-spacing: 2px;
+        margin-bottom: 10px;
+      }
+      .tagline {
+        font-size: 12px;
+        color: #a0a0a0;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+      }
+      .content {
+        padding: 40px 30px;
+      }
+      .greeting {
+        font-size: 18px;
+        color: #d4af37;
+        margin-bottom: 20px;
+      }
+      .intro-text {
+        font-size: 14px;
+        color: #d0d0d0;
+        margin-bottom: 30px;
+        line-height: 1.8;
+      }
+      .quote-card {
+        background-color: #0a0a0a;
+        border: 1px solid #2d2d2d;
+        border-radius: 8px;
+        padding: 25px;
+        margin-bottom: 30px;
+      }
+      .quote-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #2d2d2d;
+      }
+      .quote-ref {
+        font-size: 16px;
+        font-weight: bold;
+        color: #d4af37;
+      }
+      .quote-date {
+        font-size: 13px;
+        color: #a0a0a0;
+      }
+      .items-table {
+        width: 100%;
+        margin-bottom: 20px;
+        border-collapse: collapse;
+      }
+      .items-table th {
+        background-color: #2d2d2d;
+        color: #d4af37;
+        padding: 12px;
+        text-align: left;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+      .items-table td {
+        padding: 12px;
+        border-bottom: 1px solid #2d2d2d;
+        font-size: 14px;
+        color: #d0d0d0;
+      }
+      .items-table tr:last-child td {
+        border-bottom: none;
+      }
+      .total-section {
+        background-color: #1a1a1a;
+        padding: 20px;
+        border-radius: 6px;
+        margin-top: 20px;
+      }
+      .total-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 0;
+        font-size: 14px;
+        color: #d0d0d0;
+      }
+      .total-row.final {
+        border-top: 2px solid #d4af37;
+        margin-top: 10px;
+        padding-top: 15px;
+        font-size: 18px;
+        font-weight: bold;
+        color: #d4af37;
+      }
+      .notes-section {
+        background-color: #2d2d2d;
+        border-left: 3px solid #d4af37;
+        padding: 15px;
+        margin-top: 25px;
+        border-radius: 4px;
+      }
+      .notes-title {
+        font-size: 13px;
+        color: #d4af37;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 10px;
+      }
+      .notes-text {
+        font-size: 13px;
+        color: #c0c0c0;
+        line-height: 1.6;
+      }
+      .cta-button {
+        display: inline-block;
+        background: linear-gradient(135deg, #d4af37 0%, #b5952f 100%);
+        color: #0a0a0a;
+        text-decoration: none;
+        padding: 15px 40px;
+        border-radius: 6px;
+        font-weight: bold;
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin: 30px 0;
+        transition: transform 0.2s;
+      }
+      .cta-button:hover {
+        transform: translateY(-2px);
+      }
+      .footer {
+        background-color: #0a0a0a;
+        padding: 30px;
+        text-align: center;
+        border-top: 1px solid #2d2d2d;
+      }
+      .footer-text {
+        font-size: 12px;
+        color: #808080;
+        line-height: 1.8;
+      }
+      .footer-link {
+        color: #d4af37;
+        text-decoration: none;
+      }
+      .social-links {
+        margin-top: 20px;
+      }
+      .social-links a {
+        display: inline-block;
+        margin: 0 10px;
+        color: #d4af37;
+        font-size: 20px;
+        text-decoration: none;
+      }
+      @media only screen and (max-width: 600px) {
+        .content {
+          padding: 20px;
+        }
+        .quote-header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+        .quote-date {
+          margin-top: 5px;
+        }
+        .items-table th,
+        .items-table td {
+          padding: 8px;
+          font-size: 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="email-container">
+      <!-- Header -->
+      <div class="header">
+        <div class="logo">PAVILLON LES LYS</div>
+        <div class="tagline">Espace de Réception Haut de Gamme</div>
+      </div>
+
+      <!-- Content -->
+      <div class="content">
+        <div class="greeting">Bonjour {{firstName}} {{lastName}},</div>
+
+        <p class="intro-text">
+          Nous avons le plaisir de vous transmettre votre devis personnalisé
+          pour votre événement au Pavillon Les Lys. Notre équipe se tient à
+          votre disposition pour toute question ou ajustement.
+        </p>
+
+        <!-- Quote Card -->
+        <div class="quote-card">
+          <div class="quote-header">
+            <div class="quote-ref">Devis N° {{quote.reference}}</div>
+            <div class="quote-date">{{quote.date}}</div>
+          </div>
+
+          <!-- Items Table -->
+          <table class="items-table">
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th style="text-align: right;">Quantité</th>
+                <th style="text-align: right;">Prix Unit.</th>
+                <th style="text-align: right;">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{#each quote.items}}
+                <tr>
+                  <td>{{this.description}}</td>
+                  <td style="text-align: right;">{{this.quantity}}</td>
+                  <td style="text-align: right;">{{this.unitPrice}} €</td>
+                  <td style="text-align: right;">{{this.totalPrice}} €</td>
+                </tr>
+              {{/each}}
+            </tbody>
+          </table>
+
+          <!-- Total Section -->
+          <div class="total-section">
+            <div class="total-row">
+              <span>Total HT</span>
+              <span>{{quote.totalHT}} €</span>
+            </div>
+            <div class="total-row">
+              <span>TVA ({{quote.tva}}%)</span>
+              <span>{{quote.tvaAmount}} €</span>
+            </div>
+            <div class="total-row final">
+              <span>Total TTC</span>
+              <span>{{quote.totalTTC}} €</span>
+            </div>
+          </div>
+
+          <!-- Notes Section -->
+          {{#if quote.notes}}
+            <div class="notes-section">
+              <div class="notes-title">Notes & Conditions</div>
+              <div class="notes-text">{{quote.notes}}</div>
+            </div>
+          {{/if}}
+        </div>
+
+        <!-- CTA Button -->
+        <center>
+          <a href="{{downloadUrl}}" class="cta-button">
+            📥 Télécharger le Devis PDF
+          </a>
+        </center>
+
+        <p class="intro-text" style="margin-top: 30px;">
+          Ce devis est valable 30 jours à compter de sa date d'émission. Pour
+          confirmer votre réservation, un acompte de 30% du montant total est
+          requis.<br /><br />
+          Nous restons à votre entière disposition pour toute information
+          complémentaire.
+        </p>
+      </div>
+
+      <!-- Footer -->
+      <div class="footer">
+        <p class="footer-text">
+          <strong style="color: #D4AF37;">Pavillon Les Lys</strong><br />
+          Espace de Réception Haut de Gamme<br />
+          📍 [Adresse] • 📞 [Téléphone]<br />
+          <a
+            href="mailto:contact@pavillon-les-lys.fr"
+            class="footer-link"
+          >contact@pavillon-les-lys.fr</a>
+        </p>
+
+        <div class="social-links">
+          <a href="#">📘</a>
+          <a href="#">📷</a>
+          <a href="#">🐦</a>
+        </div>
+
+        <p class="footer-text" style="margin-top: 20px; font-size: 11px;">
+          © 2026 Pavillon Les Lys. Tous droits réservés.<br />
+          Vous recevez cet email car vous avez demandé un devis sur notre
+          plateforme.
+        </p>
+      </div>
+    </div>
+  </body>
+</html>

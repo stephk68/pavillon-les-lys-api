@@ -2,356 +2,290 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
-} from '@nestjs/common';
-import { Quote } from '@prisma/client';
-import { PrismaService } from '../../common/services/prisma.service';
-import { ReservationService } from '../reservation/reservation.service';
-import { CreateQuoteDto } from './dto/create-quote.dto';
-import { UpdateQuoteDto } from './dto/update-quote.dto';
+} from "@nestjs/common";
+import { Quote, QuoteItem, QuoteStatus } from "@prisma/client";
+import { PrismaService } from "../../common/services/prisma.service";
+import { CreateQuoteDto } from "./dto/create-quote.dto";
+import { UpdateQuoteDto } from "./dto/update-quote.dto";
+
+type QuoteWithItems = Quote & { items: QuoteItem[] };
 
 @Injectable()
 export class QuoteService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly reservationService: ReservationService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
+
+  // --- LOGIQUE MÉTIER ---
+
+  private generateQuoteNumber(): string {
+    // Format : DEV-YYYYMM-XXXX (ex: DEV-202512-AB12)
+    const date = new Date().toISOString().slice(0, 7).replace("-", "");
+    const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+    return `DEV-${date}-${random}`;
+  }
+
+  private calculateTotals(items: { quantity: number; unitPrice: number }[]) {
+    const totalHT = items.reduce(
+      (acc, item) => acc + item.quantity * item.unitPrice,
+      0
+    );
+    const vatRate = 0.18; // 18%
+    const taxes = totalHT * vatRate;
+    const totalTTC = totalHT + taxes;
+
+    return { totalHT, taxes, totalTTC };
+  }
+
+  // --- CRUD ---
 
   async create(createQuoteDto: CreateQuoteDto): Promise<Quote> {
-    // Vérifier que la réservation existe si elle est fournie
-    if (createQuoteDto.reservationId) {
-      await this.reservationService.findOne(createQuoteDto.reservationId);
+    const { userId, reservationId, items, validUntil } = createQuoteDto;
 
-      // Vérifier qu'il n'y a pas déjà un devis pour cette réservation
-      const existingQuote = await this.findByReservationId(
-        createQuoteDto.reservationId,
-      );
-      if (existingQuote) {
-        throw new BadRequestException(
-          'Un devis existe déjà pour cette réservation',
-        );
+    // 1. Calculs financiers
+    const { totalHT, taxes, totalTTC } = this.calculateTotals(items);
+
+    // 2. Création Transactionnelle (Quote + Items + Reservation Link)
+    return this.prisma.$transaction(async (tx) => {
+      // Vérifier unicité réservation si fournie
+      if (reservationId) {
+        const existing = await tx.quote.findFirst({ where: { reservationId } });
+        if (existing)
+          throw new BadRequestException(
+            "Un devis existe déjà pour cette réservation."
+          );
       }
-    }
 
-    // Calculer le montant total à partir des items
-    const totalAmount = this.calculateTotalAmount(createQuoteDto.items);
-
-    const quote = await this.prisma.quote.create({
-      data: {
-        ...createQuoteDto,
-        totalAmount,
-      },
-    });
-
-    // Si le devis est lié à une réservation, mettre à jour la réservation
-    if (createQuoteDto.reservationId) {
-      await this.prisma.reservation.update({
-        where: { id: createQuoteDto.reservationId },
-        data: { quoteId: quote.id },
+      const quote = await tx.quote.create({
+        data: {
+          number: this.generateQuoteNumber(),
+          userId,
+          reservationId, // Peut être null
+          validUntil: new Date(validUntil),
+          status: QuoteStatus.DRAFT,
+          totalHT,
+          vatRate: 18.0,
+          totalTTC,
+          // Création des lignes via la relation Prisma
+          items: {
+            create: items.map((item) => ({
+              description: item.description,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              totalPrice: item.quantity * item.unitPrice,
+            })),
+          },
+        },
+        include: { items: true, reservation: true },
       });
-    }
 
-    return quote;
+      return quote;
+    });
   }
 
   async findAll(options?: {
     skip?: number;
     take?: number;
-    hasReservation?: boolean;
-  }): Promise<Quote[]> {
-    const { skip = 0, take = 50, hasReservation } = options || {};
-
+    status?: QuoteStatus;
+    userId?: string;
+    startDate?: string;
+    endDate?: string;
+  }) {
     const where: any = {};
-    if (hasReservation !== undefined) {
-      where.reservation = hasReservation ? { isNot: null } : { is: null };
+
+    if (options?.status) where.status = options.status;
+    if (options?.userId) where.userId = options.userId;
+    if (options?.startDate || options?.endDate) {
+      where.createdAt = {};
+      if (options.startDate) where.createdAt.gte = new Date(options.startDate);
+      if (options.endDate) where.createdAt.lte = new Date(options.endDate);
     }
 
     return this.prisma.quote.findMany({
       where,
-      skip,
-      take,
+      skip: options?.skip,
+      take: options?.take,
+      orderBy: { createdAt: "desc" },
       include: {
-        reservation: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        },
+        items: true,
+        user: { select: { firstName: true, lastName: true, email: true } },
+        reservation: true,
       },
-      orderBy: { createdAt: 'desc' },
     });
   }
 
-  async findOne(id: string): Promise<any> {
+  async findOne(id: string): Promise<QuoteWithItems> {
     const quote = await this.prisma.quote.findUnique({
       where: { id },
       include: {
-        reservation: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-                phone: true,
-              },
-            },
-          },
-        },
+        items: true, // Important : récupérer les lignes
+        user: true,
+        reservation: true,
       },
     });
+    if (!quote) throw new NotFoundException(`Devis ${id} introuvable`);
+    return quote;
+  }
 
-    if (!quote) {
-      throw new NotFoundException(`Devis avec l'ID ${id} non trouvé`);
+  async update(id: string, updateQuoteDto: UpdateQuoteDto): Promise<Quote> {
+    const quote = await this.findOne(id);
+    if (quote.status !== QuoteStatus.DRAFT) {
+      throw new BadRequestException(
+        "Seul un devis en brouillon peut être modifié."
+      );
     }
 
-    return quote;
+    const { items, validUntil, ...rest } = updateQuoteDto;
+
+    // Si on met à jour les items, on recalcule tout
+    let financialData = {};
+    let itemsOperation = {};
+
+    if (items) {
+      const { totalHT, taxes, totalTTC } = this.calculateTotals(items);
+      financialData = { totalHT, taxes, totalTTC }; // Pas de TVA dans la base, on stocke le montant calculé ou le taux ? Ici j'ai supposé stocker le montant taxes.
+
+      // Stratégie : Supprimer les anciens items et recréer les nouveaux (plus simple pour la consistance)
+      itemsOperation = {
+        items: {
+          deleteMany: {}, // Vide la liste
+          create: items.map((item) => ({
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            totalPrice: item.quantity * item.unitPrice,
+          })),
+        },
+      };
+    }
+
+    return this.prisma.quote.update({
+      where: { id },
+      data: {
+        ...rest,
+        validUntil: validUntil ? new Date(validUntil) : undefined,
+        ...financialData,
+        ...itemsOperation,
+      },
+      include: { items: true },
+    });
+  }
+
+  async updateStatus(id: string, status: QuoteStatus): Promise<Quote> {
+    return this.prisma.quote.update({
+      where: { id },
+      data: { status },
+    });
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.prisma.quote.delete({ where: { id } });
   }
 
   async findByReservationId(reservationId: string): Promise<Quote | null> {
     return this.prisma.quote.findFirst({
-      where: {
-        reservation: {
-          id: reservationId,
-        },
-      },
+      where: { reservationId },
       include: {
-        reservation: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-              },
-            },
+        items: true,
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
           },
         },
-      },
-    });
-  }
-
-  async update(id: string, updateQuoteDto: UpdateQuoteDto): Promise<Quote> {
-    // Vérifier que le devis existe
-    await this.findOne(id);
-
-    // Recalculer le montant total si les items sont modifiés
-    let updateData: any = { ...updateQuoteDto };
-    if (updateQuoteDto.items) {
-      updateData.totalAmount = this.calculateTotalAmount(updateQuoteDto.items);
-    }
-
-    const updatedQuote = await this.prisma.quote.update({
-      where: { id },
-      data: updateData,
-      include: {
-        reservation: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    return updatedQuote;
-  }
-
-  async remove(id: string): Promise<void> {
-    const quote = await this.prisma.quote.findUnique({
-      where: { id },
-      include: {
         reservation: true,
       },
-    });
-
-    // Si le devis est lié à une réservation, supprimer la référence
-    if (quote.reservation) {
-      await this.prisma.reservation.update({
-        where: { id: quote.reservation.id },
-        data: { quoteId: null },
-      });
-    }
-
-    await this.prisma.quote.delete({
-      where: { id },
     });
   }
 
   async duplicate(id: string): Promise<Quote> {
     const originalQuote = await this.findOne(id);
+    const { totalHT, totalTTC } = this.calculateTotals(
+      originalQuote.items.map((item) => ({
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPrice),
+      }))
+    );
 
-    const newQuote = await this.prisma.quote.create({
+    return this.prisma.quote.create({
       data: {
-        items: originalQuote.items,
-        totalAmount: originalQuote.totalAmount,
-        currency: originalQuote.currency,
-        // Ne pas lier à la même réservation
+        number: this.generateQuoteNumber(),
+        userId: originalQuote.userId,
+        totalHT,
+        vatRate: originalQuote.vatRate,
+        totalTTC,
+        validUntil: originalQuote.validUntil,
+        status: QuoteStatus.DRAFT,
+        items: {
+          create: originalQuote.items.map((item) => ({
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            totalPrice: item.totalPrice,
+          })),
+        },
       },
+      include: { items: true },
     });
-
-    return newQuote;
   }
 
-  async linkToReservation(
-    quoteId: string,
-    reservationId: string,
-  ): Promise<Quote> {
-    // Vérifier que le devis et la réservation existent
-    await this.findOne(quoteId);
-    await this.reservationService.findOne(reservationId);
+  async sendQuote(id: string, recipientEmail?: string): Promise<Quote> {
+    const quote = await this.findOne(id);
 
-    // Vérifier qu'il n'y a pas déjà un devis pour cette réservation
-    const existingQuote = await this.findByReservationId(reservationId);
-    if (existingQuote && existingQuote.id !== quoteId) {
+    if (quote.status !== QuoteStatus.DRAFT) {
       throw new BadRequestException(
-        'Un autre devis est déjà lié à cette réservation',
+        "Seuls les brouillons peuvent être envoyés"
       );
     }
 
-    // Mettre à jour le devis et la réservation
-    await this.prisma.reservation.update({
-      where: { id: reservationId },
-      data: { quoteId },
-    });
+    // TODO: Implémenter l'envoi d'email avec le système de mail
+    // Pour l'instant, on change juste le statut
 
-    return this.findOne(quoteId);
-  }
-
-  async unlinkFromReservation(quoteId: string): Promise<Quote> {
-    const quote = await this.prisma.quote.findUnique({
-      where: { id: quoteId },
+    return this.prisma.quote.update({
+      where: { id },
+      data: { status: QuoteStatus.SENT },
       include: {
+        items: true,
+        user: true,
         reservation: true,
       },
     });
-
-    if (quote.reservation) {
-      await this.prisma.reservation.update({
-        where: { id: quote.reservation.id },
-        data: { quoteId: null },
-      });
-    }
-
-    return this.findOne(quoteId);
   }
 
-  async addItem(quoteId: string, item: any): Promise<Quote> {
-    const quote = await this.findOne(quoteId);
-    const currentItems = Array.isArray(quote.items) ? quote.items : [];
+  async approveQuote(id: string): Promise<Quote> {
+    const quote = await this.findOne(id);
 
-    const newItems = [...currentItems, item];
-    const newTotalAmount = this.calculateTotalAmount(newItems);
+    if (quote.status === QuoteStatus.ACCEPTED) {
+      throw new BadRequestException("Ce devis est déjà accepté");
+    }
 
     return this.prisma.quote.update({
-      where: { id: quoteId },
-      data: {
-        items: newItems,
-        totalAmount: newTotalAmount,
-      },
+      where: { id },
+      data: { status: QuoteStatus.ACCEPTED },
       include: {
-        reservation: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        },
+        items: true,
+        user: true,
+        reservation: true,
       },
     });
   }
 
-  async removeItem(quoteId: string, itemIndex: number): Promise<Quote> {
-    const quote = await this.findOne(quoteId);
-    const currentItems = Array.isArray(quote.items) ? quote.items : [];
+  async rejectQuote(id: string, reason: string): Promise<Quote> {
+    const quote = await this.findOne(id);
 
-    if (itemIndex < 0 || itemIndex >= currentItems.length) {
-      throw new BadRequestException("Index d'item invalide");
+    if (quote.status === QuoteStatus.REJECTED) {
+      throw new BadRequestException("Ce devis est déjà rejeté");
     }
 
-    const newItems = currentItems.filter((_, index) => index !== itemIndex);
-    const newTotalAmount = this.calculateTotalAmount(newItems);
+    // TODO: Stocker la raison du rejet (ajouter un champ dans le schéma si nécessaire)
 
     return this.prisma.quote.update({
-      where: { id: quoteId },
-      data: {
-        items: newItems,
-        totalAmount: newTotalAmount,
-      },
+      where: { id },
+      data: { status: QuoteStatus.REJECTED },
       include: {
-        reservation: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        },
-      },
-    });
-  }
-
-  async updateItem(
-    quoteId: string,
-    itemIndex: number,
-    updatedItem: any,
-  ): Promise<Quote> {
-    const quote = await this.findOne(quoteId);
-    const currentItems = Array.isArray(quote.items) ? quote.items : [];
-
-    if (itemIndex < 0 || itemIndex >= currentItems.length) {
-      throw new BadRequestException("Index d'item invalide");
-    }
-
-    const newItems = [...currentItems];
-    const currentItem = newItems[itemIndex];
-    newItems[itemIndex] =
-      typeof currentItem === 'object' && currentItem !== null
-        ? { ...currentItem, ...updatedItem }
-        : updatedItem;
-    const newTotalAmount = this.calculateTotalAmount(newItems);
-
-    return this.prisma.quote.update({
-      where: { id: quoteId },
-      data: {
-        items: newItems,
-        totalAmount: newTotalAmount,
-      },
-      include: {
-        reservation: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        },
+        items: true,
+        user: true,
+        reservation: true,
       },
     });
   }
@@ -360,20 +294,20 @@ export class QuoteService {
     const totalQuotes = await this.prisma.quote.count();
 
     const totalAmount = await this.prisma.quote.aggregate({
-      _sum: { totalAmount: true },
+      _sum: { totalTTC: true },
     });
 
-    const quotesWithReservations = await this.prisma.quote.count({
-      where: { reservation: { isNot: null } },
-    });
-
-    const quotesWithoutReservations = totalQuotes - quotesWithReservations;
+    const quotesByStatus = await Promise.all(
+      Object.values(QuoteStatus).map(async (status) => ({
+        status,
+        count: await this.prisma.quote.count({ where: { status } }),
+      }))
+    );
 
     return {
       totalQuotes,
-      totalAmount: totalAmount._sum.totalAmount || 0,
-      quotesWithReservations,
-      quotesWithoutReservations,
+      totalAmount: totalAmount._sum.totalTTC || 0,
+      quotesByStatus,
     };
   }
 
@@ -384,17 +318,7 @@ export class QuoteService {
     return {
       quote,
       exportDate: new Date(),
-      format: 'json', // À adapter selon vos besoins
+      format: "json", // À adapter selon vos besoins
     };
-  }
-
-  private calculateTotalAmount(items: any[]): number {
-    if (!Array.isArray(items)) return 0;
-
-    return items.reduce((total, item) => {
-      const quantity = Number(item.quantity) || 0;
-      const price = Number(item.price) || 0;
-      return total + quantity * price;
-    }, 0);
   }
 }

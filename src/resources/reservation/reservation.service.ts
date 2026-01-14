@@ -3,22 +3,22 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
-} from '@nestjs/common';
-import { EventType, Reservation, ReservationStatus } from '@prisma/client';
-import { PrismaService } from '../../common/services/prisma.service';
-import { CreateReservationDto } from './dto/create-reservation.dto';
-import { UpdateReservationDto } from './dto/update-reservation.dto';
+} from "@nestjs/common";
+import { EventType, Reservation, ReservationStatus } from "@prisma/client";
+import { PrismaService } from "../../common/services/prisma.service";
+import { CreateReservationDto } from "./dto/create-reservation.dto";
+import { UpdateReservationDto } from "./dto/update-reservation.dto";
 
 @Injectable()
 export class ReservationService {
   constructor(private readonly prisma: PrismaService) {}
   async create(
     createReservationDto: CreateReservationDto,
-    userId: string,
+    userId: string
   ): Promise<Reservation> {
     // Vérifier que la date de début est dans le futur
     if (new Date(createReservationDto.start) <= new Date()) {
-      throw new BadRequestException('La date de début doit être dans le futur');
+      throw new BadRequestException("La date de début doit être dans le futur");
     }
 
     // Vérifier que la date de fin est après la date de début
@@ -26,14 +26,14 @@ export class ReservationService {
       new Date(createReservationDto.end) <= new Date(createReservationDto.start)
     ) {
       throw new BadRequestException(
-        'La date de fin doit être après la date de début',
+        "La date de fin doit être après la date de début"
       );
     }
 
     // Vérifier les conflits de réservation
     const conflictingReservation = await this.checkAvailability(
       new Date(createReservationDto.start),
-      new Date(createReservationDto.end),
+      new Date(createReservationDto.end)
     );
 
     if (conflictingReservation) {
@@ -62,6 +62,93 @@ export class ReservationService {
     });
 
     return reservation;
+  }
+
+  async createBackOffice(data: any): Promise<any> {
+    // Vérifier que la date de fin est après la date de début
+    if (new Date(data.end) <= new Date(data.start)) {
+      throw new BadRequestException(
+        "La date de fin doit être après la date de début"
+      );
+    }
+
+    // Vérifier les conflits de réservation
+    const isAvailable = await this.checkAvailability(
+      new Date(data.start),
+      new Date(data.end)
+    );
+
+    if (!isAvailable) {
+      throw new ConflictException("Le créneau demandé n'est pas disponible");
+    }
+
+    // Chercher ou créer le client
+    let user = await this.prisma.user.findUnique({
+      where: { email: data.clientEmail },
+    });
+
+    let isNewClient = false;
+    let temporaryPassword: string | undefined;
+
+    if (!user) {
+      // Générer un mot de passe temporaire
+      temporaryPassword = Math.random().toString(36).slice(-8);
+      const bcrypt = require("bcrypt");
+      const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
+
+      // Créer le nouveau client
+      user = await this.prisma.user.create({
+        data: {
+          email: data.clientEmail,
+          firstName: data.clientFirstName,
+          lastName: data.clientLastName,
+          phone: data.clientPhone,
+          password: hashedPassword,
+          role: "CLIENT",
+        },
+      });
+
+      isNewClient = true;
+    }
+
+    // Créer la réservation
+    const reservation = await this.prisma.reservation.create({
+      data: {
+        eventType: data.eventType as EventType,
+        start: new Date(data.start),
+        end: new Date(data.end),
+        attendees: data.attendees,
+        userId: user.id,
+        status: ReservationStatus.PENDING,
+        description: data.description,
+        specialRequests: data.specialRequests,
+        estimatedBudget: data.estimatedBudget,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            phone: true,
+          },
+        },
+      },
+    });
+
+    return {
+      reservation,
+      client: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        isNewClient,
+        temporaryPassword: isNewClient ? temporaryPassword : undefined,
+        emailSent: false,
+      },
+    };
   }
 
   async findAll(options?: {
@@ -95,23 +182,33 @@ export class ReservationService {
       if (endDate) where.start.lte = endDate;
     }
 
-    return this.prisma.reservation.findMany({
-      where,
-      skip,
-      take,
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
-            phone: true,
+    const [data, total] = await Promise.all([
+      this.prisma.reservation.findMany({
+        where,
+        skip,
+        take,
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+              phone: true,
+            },
           },
         },
-      },
-      orderBy: { start: 'asc' },
-    });
+        orderBy: { start: "asc" },
+      }),
+      this.prisma.reservation.count({ where }),
+    ]);
+
+    return {
+      data,
+      total,
+      skip,
+      take,
+    };
   }
 
   async findOne(id: string): Promise<Reservation> {
@@ -140,37 +237,62 @@ export class ReservationService {
 
   async update(
     id: string,
-    updateReservationDto: UpdateReservationDto,
+    updateReservationDto: UpdateReservationDto
   ): Promise<Reservation> {
     // Vérifier que la réservation existe
     const existingReservation = await this.findOne(id);
 
     // Si on modifie les dates, vérifier les conflits
     if (updateReservationDto.start || updateReservationDto.end) {
-      const newStart = updateReservationDto.start || existingReservation.start;
-      const newEnd = updateReservationDto.end || existingReservation.end;
+      const newStart = updateReservationDto.start
+        ? new Date(updateReservationDto.start)
+        : existingReservation.start;
+      const newEnd = updateReservationDto.end
+        ? new Date(updateReservationDto.end)
+        : existingReservation.end;
 
-      // Vérifier que les nouvelles dates sont cohérentes
-      if (new Date(newEnd) <= new Date(newStart)) {
+      // Vérifier si les dates ont réellement changé
+      const startChanged =
+        updateReservationDto.start &&
+        new Date(updateReservationDto.start).getTime() !==
+          existingReservation.start.getTime();
+      const endChanged =
+        updateReservationDto.end &&
+        new Date(updateReservationDto.end).getTime() !==
+          existingReservation.end.getTime();
+
+      // Vérifier la cohérence des dates SEULEMENT si elles ont changé
+      if ((startChanged || endChanged) && newEnd <= newStart) {
         throw new BadRequestException(
-          'La date de fin doit être après la date de début',
+          "La date de fin doit être après la date de début"
         );
       }
 
-      // Vérifier les conflits (exclure la réservation actuelle)
-      const conflictingReservation = await this.checkAvailability(
-        newStart,
-        newEnd,
-        id,
-      );
-      if (conflictingReservation) {
-        throw new ConflictException("Le nouveau créneau n'est pas disponible");
+      // Vérifier les conflits SEULEMENT si les dates ont changé
+      if (startChanged || endChanged) {
+        const isAvailable = await this.checkAvailability(newStart, newEnd, id);
+        if (!isAvailable) {
+          throw new ConflictException(
+            "Le nouveau créneau n'est pas disponible"
+          );
+        }
       }
+    }
+
+    // Préparer les données pour la mise à jour
+    const updateData: any = { ...updateReservationDto };
+
+    // Convertir les dates au format ISO-8601 complet si présentes
+    if (updateData.start) {
+      updateData.start = new Date(updateData.start);
+    }
+    if (updateData.end) {
+      updateData.end = new Date(updateData.end);
     }
 
     const updatedReservation = await this.prisma.reservation.update({
       where: { id },
-      data: updateReservationDto,
+      data: updateData,
       include: {
         user: {
           select: {
@@ -189,7 +311,7 @@ export class ReservationService {
 
   async updateStatus(
     id: string,
-    status: ReservationStatus,
+    status: ReservationStatus
   ): Promise<Reservation> {
     await this.findOne(id); // Vérifier que la réservation existe
 
@@ -216,18 +338,18 @@ export class ReservationService {
     // Vérifier que l'utilisateur peut annuler cette réservation
     if (userId && reservation.userId !== userId) {
       throw new BadRequestException(
-        'Vous ne pouvez annuler que vos propres réservations',
+        "Vous ne pouvez annuler que vos propres réservations"
       );
     }
 
     // Vérifier que la réservation peut être annulée
     if (reservation.status === ReservationStatus.CANCELED) {
-      throw new BadRequestException('Cette réservation est déjà annulée');
+      throw new BadRequestException("Cette réservation est déjà annulée");
     }
 
     if (reservation.status === ReservationStatus.COMPLETED) {
       throw new BadRequestException(
-        "Impossible d'annuler une réservation terminée",
+        "Impossible d'annuler une réservation terminée"
       );
     }
 
@@ -239,7 +361,7 @@ export class ReservationService {
 
     if (reservation.status !== ReservationStatus.PENDING) {
       throw new BadRequestException(
-        'Seules les réservations en attente peuvent être confirmées',
+        "Seules les réservations en attente peuvent être confirmées"
       );
     }
 
@@ -251,14 +373,14 @@ export class ReservationService {
 
     if (reservation.status !== ReservationStatus.CONFIRMED) {
       throw new BadRequestException(
-        'Seules les réservations confirmées peuvent être marquées comme terminées',
+        "Seules les réservations confirmées peuvent être marquées comme terminées"
       );
     }
 
     // Vérifier que la date est passée
     if (new Date(reservation.end) > new Date()) {
       throw new BadRequestException(
-        "La réservation ne peut être marquée comme terminée qu'après sa date de fin",
+        "La réservation ne peut être marquée comme terminée qu'après sa date de fin"
       );
     }
 
@@ -278,7 +400,7 @@ export class ReservationService {
 
     if (payments.length > 0) {
       throw new BadRequestException(
-        'Impossible de supprimer une réservation avec des paiements associés',
+        "Impossible de supprimer une réservation avec des paiements associés"
       );
     }
 
@@ -290,7 +412,7 @@ export class ReservationService {
   async checkAvailability(
     start: Date | string,
     end: Date | string,
-    excludeReservationId?: string,
+    excludeReservationId?: string
   ): Promise<boolean> {
     const startDate = new Date(start);
     const endDate = new Date(end);
@@ -349,7 +471,7 @@ export class ReservationService {
           in: [ReservationStatus.PENDING, ReservationStatus.CONFIRMED],
         },
       },
-      orderBy: { start: 'asc' },
+      orderBy: { start: "asc" },
     });
 
     // Logique pour calculer les créneaux libres
@@ -357,13 +479,13 @@ export class ReservationService {
     return [];
   }
 
-  async getUserReservations(userId: string): Promise<Reservation[]> {
+  async getUserReservations(userId: string) {
     return this.findAll({ userId });
   }
 
   async getReservationStats() {
     const stats = await this.prisma.reservation.groupBy({
-      by: ['status'],
+      by: ["status"],
       _count: true,
     });
 
@@ -375,7 +497,7 @@ export class ReservationService {
     };
   }
 
-  async getUpcomingReservations(days: number = 7): Promise<Reservation[]> {
+  async getUpcomingReservations(days: number = 7) {
     const startDate = new Date();
     const endDate = new Date();
     endDate.setDate(endDate.getDate() + days);
