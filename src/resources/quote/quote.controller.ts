@@ -1,22 +1,25 @@
 import {
-  BadRequestException,
-  Body,
-  Controller,
-  Delete,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Param,
-  ParseUUIDPipe,
-  Patch,
-  Post,
-  Query,
-  UseGuards,
+    BadRequestException,
+    Body,
+    Controller,
+    Delete,
+    Get,
+    HttpCode,
+    HttpStatus,
+    Param,
+    ParseUUIDPipe,
+    Patch,
+    Post,
+    Query,
+    Res,
+    UseGuards,
 } from "@nestjs/common";
 import { QuoteStatus, Role } from "@prisma/client";
+import { Response } from "express";
 import { Roles } from "src/common/decorators/permission.decorator";
 import { AuthenticationGuard } from "../../common/guards/authentication.guard";
 import { AuthorizationGuard } from "../../common/guards/authorization.guard";
+import { ConvertToReservationDto } from "./dto/convert-to-reservation.dto";
 import { CreateQuoteDto } from "./dto/create-quote.dto";
 import { UpdateQuoteDto } from "./dto/update-quote.dto";
 import { QuoteService } from "./quote.service";
@@ -26,7 +29,11 @@ import { QuoteService } from "./quote.service";
 export class QuoteController {
   constructor(private readonly quoteService: QuoteService) {}
 
-  // Seuls les admins et staff peuvent créer des devis
+  // ============================================================================
+  // CRUD de base
+  // ============================================================================
+
+  // Seuls les admins et staff peuvent créer des devis (lié à une réservation)
   @Roles(Role.ADMIN, Role.EVENT_MANAGER)
   @Post()
   async create(@Body() createQuoteDto: CreateQuoteDto) {
@@ -83,6 +90,10 @@ export class QuoteController {
     await this.quoteService.delete(id);
   }
 
+  // ============================================================================
+  // Actions sur les devis
+  // ============================================================================
+
   @Post(":id/duplicate")
   @Roles(Role.ADMIN, Role.EVENT_MANAGER)
   async duplicate(@Param("id", ParseUUIDPipe) id: string) {
@@ -95,7 +106,7 @@ export class QuoteController {
     @Param("id", ParseUUIDPipe) id: string,
     @Body("recipientEmail") recipientEmail?: string
   ) {
-    return this.quoteService.sendQuote(id, recipientEmail);
+    return this.quoteService.sendQuoteWithPdf(id, recipientEmail);
   }
 
   @Patch(":id/approve")
@@ -122,8 +133,71 @@ export class QuoteController {
   }
 
   @Get(":id/pdf")
-  async generatePdf(@Param("id", ParseUUIDPipe) id: string) {
-    // TODO: Implémenter la génération de PDF
-    throw new BadRequestException("Génération de PDF non encore implémentée");
+  @Roles(Role.ADMIN, Role.EVENT_MANAGER)
+  async generatePdf(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Res() res: Response
+  ) {
+    const pdfBuffer = await this.quoteService.generatePdf(id);
+
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="Devis-${id.slice(0, 8)}.pdf"`,
+      "Content-Length": pdfBuffer.length,
+    });
+
+    res.end(pdfBuffer);
+  }
+
+  // ============================================================================
+  // SALES FUNNEL - Mode Devis Standalone
+  // ============================================================================
+
+  /**
+   * Crée un devis standalone (sans réservation existante)
+   * Les détails de l'événement sont stockés dans eventDetails
+   * POST /quotes/standalone
+   */
+  @Roles(Role.ADMIN, Role.EVENT_MANAGER)
+  @Post("standalone")
+  async createStandalone(@Body() createQuoteDto: CreateQuoteDto) {
+    return this.quoteService.createStandalone(createQuoteDto);
+  }
+
+  /**
+   * Convertit un devis ACCEPTED en réservation
+   * Vérifie la disponibilité et crée la réservation
+   * POST /quotes/:id/convert-to-reservation
+   */
+  @Roles(Role.ADMIN, Role.EVENT_MANAGER)
+  @Post(":id/convert-to-reservation")
+  async convertToReservation(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto?: ConvertToReservationDto
+  ) {
+    return this.quoteService.convertToReservation(id, dto);
+  }
+
+  /**
+   * Télécharge le PDF du devis (alias de /pdf pour clarté)
+   * GET /quotes/:id/download
+   */
+  @Roles(Role.ADMIN, Role.EVENT_MANAGER)
+  @Get(":id/download")
+  async downloadPdf(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Res() res: Response
+  ) {
+    const pdfBuffer = await this.quoteService.generatePdf(id);
+    const quote = await this.quoteService.findOne(id);
+
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="Devis-${quote.number}.pdf"`,
+      "Content-Length": pdfBuffer.length,
+    });
+
+    res.end(pdfBuffer);
   }
 }
+

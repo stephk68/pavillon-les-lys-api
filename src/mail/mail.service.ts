@@ -290,4 +290,72 @@ export class MailService {
       );
     }
   }
+
+  /**
+   * Envoie un email de devis avec le PDF en pièce jointe
+   * @param user Utilisateur destinataire
+   * @param quote Données du devis
+   * @param pdfBuffer Buffer du PDF à joindre
+   */
+  async sendQuoteWithAttachment(
+    user: { email: string; firstName: string; lastName: string },
+    quote: {
+      id: string;
+      reference: string;
+      createdAt: Date;
+      items: any[];
+      totalHT: number;
+      totalTTC: number;
+      notes?: string;
+    },
+    pdfBuffer: Buffer
+  ): Promise<void> {
+    const { email, firstName, lastName } = user;
+
+    try {
+      await this.mailerService.sendMail({
+        to: email,
+        subject: `Votre devis Pavillon Les Lys - Réf. ${quote.reference}`,
+        template: "./quote",
+        context: {
+          firstName,
+          lastName,
+          quote: {
+            reference: quote.reference,
+            date: new Date(quote.createdAt).toLocaleDateString("fr-FR", {
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            }),
+            items: quote.items,
+            totalHT: quote.totalHT.toFixed(2),
+            totalTTC: quote.totalTTC.toFixed(2),
+            tva: (
+              ((quote.totalTTC - quote.totalHT) / quote.totalHT) *
+              100
+            ).toFixed(0),
+            notes: quote.notes || "",
+          },
+          downloadUrl: `${process.env.FRONTEND_URL}/dashboard/quotes/${quote.id}/download`,
+        },
+        attachments: [
+          {
+            filename: `Devis-${quote.reference}.pdf`,
+            content: pdfBuffer,
+            contentType: "application/pdf",
+          },
+        ],
+      });
+
+      console.log(`✉️ Email de devis avec PDF envoyé à ${email}`);
+    } catch (error) {
+      console.error(
+        `❌ Erreur lors de l'envoi du devis avec PDF à ${email}:`,
+        error
+      );
+      throw new Error(
+        `Impossible d'envoyer l'email de devis avec PDF: ${error.message}`
+      );
+    }
+  }
 }

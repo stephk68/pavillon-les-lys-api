@@ -1,4 +1,9 @@
-import { PartialType } from '@nestjs/mapped-types';
-import { CreateChekclistItemDto } from './create-chekclist-item.dto';
+import { PartialType } from "@nestjs/mapped-types";
+import { IsBoolean, IsOptional } from "class-validator";
+import { CreateChekclistItemDto } from "./create-chekclist-item.dto";
 
-export class UpdateChekclistItemDto extends PartialType(CreateChekclistItemDto) {}
+export class UpdateChekclistItemDto extends PartialType(CreateChekclistItemDto) {
+  @IsOptional()
+  @IsBoolean()
+  completed?: boolean;
+}

@@ -1,10 +1,11 @@
 import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  NotFoundException,
+    BadRequestException,
+    ConflictException,
+    Injectable,
+    NotFoundException,
 } from "@nestjs/common";
 import { Payment, PaymentStatus, PaymentType, Role } from "@prisma/client";
+import { PdfService } from "../../common/services/pdf.service";
 import { PrismaService } from "../../common/services/prisma.service";
 import { ReservationService } from "../reservation/reservation.service";
 import { CreatePaymentDto } from "./dto/create-payment.dto";
@@ -14,7 +15,8 @@ import { UpdatePaymentDto } from "./dto/update-payment.dto";
 export class PaymentService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly reservationService: ReservationService
+    private readonly reservationService: ReservationService,
+    private readonly pdfService: PdfService
   ) {}
 
   async create(
@@ -152,7 +154,7 @@ export class PaymentService {
     };
   }
 
-  async findOne(id: string): Promise<Payment> {
+  async findOne(id: string) {
     const payment = await this.prisma.payment.findUnique({
       where: { id },
       include: {
@@ -162,6 +164,7 @@ export class PaymentService {
             email: true,
             firstName: true,
             lastName: true,
+            phone: true,
           },
         },
         reservation: {
@@ -172,6 +175,16 @@ export class PaymentService {
             end: true,
             attendees: true,
             status: true,
+            description: true,
+            estimatedBudget: true,
+            quote: {
+              select: {
+                id: true,
+                number: true,
+                totalTTC: true,
+                status: true,
+              },
+            },
           },
         },
       },
@@ -181,7 +194,58 @@ export class PaymentService {
       throw new NotFoundException(`Paiement avec l'ID ${id} non trouvé`);
     }
 
-    return payment;
+    // Récupérer l'historique des paiements de cette réservation
+    const reservationPayments = await this.prisma.payment.findMany({
+      where: { reservationId: payment.reservationId },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        amount: true,
+        type: true,
+        status: true,
+        dueDate: true,
+        paidAt: true,
+        createdAt: true,
+      },
+    });
+
+    // Calculer le résumé financier
+    const totalAmount = payment.reservation?.quote?.totalTTC 
+      ? Number(payment.reservation.quote.totalTTC)
+      : payment.reservation?.estimatedBudget 
+        ? Number(payment.reservation.estimatedBudget) 
+        : 0;
+
+    const paidAmount = reservationPayments
+      .filter(p => p.status === PaymentStatus.PAID)
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+
+    const pendingAmount = reservationPayments
+      .filter(p => p.status === PaymentStatus.PENDING)
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+
+    const remainingAmount = totalAmount - paidAmount;
+    const paymentProgress = totalAmount > 0 ? (paidAmount / totalAmount) * 100 : 0;
+
+    // Prochain paiement à payer
+    const nextDuePayment = reservationPayments.find(
+      p => p.status === PaymentStatus.PENDING && p.dueDate
+    );
+
+    return {
+      ...payment,
+      paymentHistory: reservationPayments,
+      financialSummary: {
+        totalAmount,
+        paidAmount,
+        pendingAmount,
+        remainingAmount,
+        paymentProgress: Math.round(paymentProgress * 100) / 100,
+        paymentsCount: reservationPayments.length,
+        paidPaymentsCount: reservationPayments.filter(p => p.status === PaymentStatus.PAID).length,
+      },
+      nextDuePayment,
+    };
   }
 
   async update(
@@ -303,6 +367,118 @@ export class PaymentService {
 
   async getReservationPayments(reservationId: string) {
     return this.findAll({ reservationId });
+  }
+
+  /**
+   * Résumé financier complet d'une réservation
+   * Retourne: réservation, tous les paiements, totaux calculés
+   */
+  async getReservationPaymentSummary(reservationId: string) {
+    // Récupérer la réservation avec le devis
+    const reservation = await this.prisma.reservation.findUnique({
+      where: { id: reservationId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            phone: true,
+          },
+        },
+        quote: {
+          select: {
+            id: true,
+            number: true,
+            totalHT: true,
+            totalTTC: true,
+            vatRate: true,
+            status: true,
+            items: true,
+          },
+        },
+      },
+    });
+
+    if (!reservation) {
+      throw new NotFoundException(`Réservation avec l'ID ${reservationId} non trouvée`);
+    }
+
+    // Récupérer tous les paiements de cette réservation
+    const payments = await this.prisma.payment.findMany({
+      where: { reservationId },
+      orderBy: { createdAt: "asc" },
+      include: {
+        User: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    // Calculer le prix total (devis prioritaire, sinon estimatedBudget)
+    const totalAmount = reservation.quote?.totalTTC
+      ? Number(reservation.quote.totalTTC)
+      : reservation.estimatedBudget
+        ? Number(reservation.estimatedBudget)
+        : 0;
+
+    // Calculer les montants par statut
+    const paidAmount = payments
+      .filter(p => p.status === PaymentStatus.PAID)
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+
+    const pendingAmount = payments
+      .filter(p => p.status === PaymentStatus.PENDING)
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+
+    const refundedAmount = payments
+      .filter(p => p.status === PaymentStatus.REFUNDED)
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+
+    const remainingAmount = Math.max(0, totalAmount - paidAmount);
+    const paymentProgress = totalAmount > 0 ? (paidAmount / totalAmount) * 100 : 0;
+
+    // Prochain paiement dû
+    const nextDuePayment = payments
+      .filter(p => p.status === PaymentStatus.PENDING)
+      .sort((a, b) => {
+        if (!a.dueDate) return 1;
+        if (!b.dueDate) return -1;
+        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+      })[0];
+
+    // Paiements en retard
+    const now = new Date();
+    const overduePayments = payments.filter(
+      p => p.status === PaymentStatus.PENDING && p.dueDate && new Date(p.dueDate) < now
+    );
+
+    return {
+      reservation,
+      payments,
+      summary: {
+        totalAmount,
+        paidAmount,
+        pendingAmount,
+        refundedAmount,
+        remainingAmount,
+        paymentProgress: Math.round(paymentProgress * 100) / 100,
+        paymentsCount: payments.length,
+        paidPaymentsCount: payments.filter(p => p.status === PaymentStatus.PAID).length,
+        pendingPaymentsCount: payments.filter(p => p.status === PaymentStatus.PENDING).length,
+        overduePaymentsCount: overduePayments.length,
+        isFullyPaid: remainingAmount === 0 && totalAmount > 0,
+        hasQuote: !!reservation.quote,
+        quoteStatus: reservation.quote?.status || null,
+      },
+      nextDuePayment: nextDuePayment || null,
+      overduePayments,
+    };
   }
 
   async getPaymentStats() {
@@ -427,5 +603,115 @@ export class PaymentService {
       customer: customer,
       reservation: reservation,
     };
+  }
+
+  /**
+   * Génère un PDF de facture pour un paiement
+   */
+  async generateInvoicePdf(paymentId: string): Promise<Buffer> {
+    const invoiceData = await this.createInvoice(paymentId);
+    const payment = await this.findOne(paymentId);
+
+    const formatDate = (date: Date) =>
+      new Date(date).toLocaleDateString("fr-FR", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      });
+
+    const formatCurrency = (amount: number) =>
+      new Intl.NumberFormat("fr-FR", {
+        style: "currency",
+        currency: "XOF",
+        minimumFractionDigits: 0,
+      }).format(amount);
+
+    // Générer le HTML de la facture
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Facture ${invoiceData.id}</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #333; padding: 40px; }
+          .header { display: flex; justify-content: space-between; margin-bottom: 40px; }
+          .logo { font-size: 28px; font-weight: bold; color: #8B7355; }
+          .invoice-info { text-align: right; }
+          .invoice-number { font-size: 24px; font-weight: bold; color: #8B7355; }
+          .invoice-date { color: #666; margin-top: 5px; }
+          .divider { height: 2px; background: linear-gradient(90deg, #8B7355, #D4AF37); margin: 30px 0; }
+          .section { margin-bottom: 30px; }
+          .section-title { font-size: 14px; text-transform: uppercase; color: #8B7355; margin-bottom: 10px; letter-spacing: 1px; }
+          .client-info { background: #f9f7f4; padding: 20px; border-radius: 8px; }
+          .client-name { font-size: 18px; font-weight: bold; }
+          .client-email { color: #666; margin-top: 5px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th { background: #8B7355; color: white; padding: 12px 15px; text-align: left; }
+          td { padding: 12px 15px; border-bottom: 1px solid #eee; }
+          .amount { text-align: right; font-weight: bold; }
+          .total-row { background: #f9f7f4; }
+          .total-row td { font-size: 18px; font-weight: bold; }
+          .footer { margin-top: 50px; text-align: center; color: #999; font-size: 12px; }
+          .status-badge { display: inline-block; padding: 5px 15px; border-radius: 20px; font-size: 12px; font-weight: bold; background: #4CAF50; color: white; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="logo">PAVILLON LES LYS</div>
+          <div class="invoice-info">
+            <div class="invoice-number">FACTURE ${invoiceData.id}</div>
+            <div class="invoice-date">${formatDate(payment.paidAt || payment.createdAt)}</div>
+            <div class="status-badge">PAYÉE</div>
+          </div>
+        </div>
+        
+        <div class="divider"></div>
+        
+        <div class="section">
+          <div class="section-title">Client</div>
+          <div class="client-info">
+            <div class="client-name">${invoiceData.customer?.firstName || ''} ${invoiceData.customer?.lastName || ''}</div>
+            <div class="client-email">${invoiceData.customer?.email || ''}</div>
+          </div>
+        </div>
+        
+        <div class="section">
+          <div class="section-title">Détail du paiement</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th>Type</th>
+                <th class="amount">Montant</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Paiement pour réservation du ${formatDate(invoiceData.reservation?.start)}</td>
+                <td>${payment.type}</td>
+                <td class="amount">${formatCurrency(Number(payment.amount))}</td>
+              </tr>
+              <tr class="total-row">
+                <td colspan="2">Total</td>
+                <td class="amount">${formatCurrency(Number(payment.amount))}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        
+        <div class="footer">
+          <p>Pavillon Les Lys - Espace événementiel de prestige</p>
+          <p>Merci pour votre confiance</p>
+        </div>
+      </body>
+      </html>
+    `;
+
+    return this.pdfService.generatePdf(html, {
+      format: "A4",
+      margin: { top: "20mm", right: "20mm", bottom: "20mm", left: "20mm" },
+    });
   }
 }

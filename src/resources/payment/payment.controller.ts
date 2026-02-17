@@ -1,17 +1,18 @@
 import {
-  Body,
-  Controller,
-  Delete,
-  ForbiddenException,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Param,
-  ParseUUIDPipe,
-  Patch,
-  Post,
-  Query,
-  UseGuards,
+    Body,
+    Controller,
+    Delete,
+    ForbiddenException,
+    Get,
+    HttpCode,
+    HttpStatus,
+    Param,
+    ParseUUIDPipe,
+    Patch,
+    Post,
+    Query,
+    Res,
+    UseGuards,
 } from "@nestjs/common";
 import { PaymentStatus, PaymentType, Role } from "@prisma/client";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
@@ -120,6 +121,15 @@ export class PaymentController {
     return this.paymentService.getReservationPayments(reservationId);
   }
 
+  // Résumé financier complet d'une réservation (historique + totaux)
+  @Roles(Role.ADMIN, Role.EVENT_MANAGER)
+  @Get("reservation/:reservationId/summary")
+  async getReservationPaymentSummary(
+    @Param("reservationId", ParseUUIDPipe) reservationId: string
+  ) {
+    return this.paymentService.getReservationPaymentSummary(reservationId);
+  }
+
   // Utilisateurs peuvent voir leurs paiements, admins et staff peuvent voir tous
   @Get(":id")
   async findOne(
@@ -149,6 +159,31 @@ export class PaymentController {
     }
 
     return this.paymentService.createInvoice(id);
+  }
+
+  // Télécharger la facture en PDF
+  @Get(":id/invoice/pdf")
+  async downloadInvoicePdf(
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentUser() user: any,
+    @Res() res: any
+  ) {
+    const payment = await this.paymentService.findOne(id);
+
+    // Vérifier les permissions
+    if (user.role === Role.CLIENT && payment.userId !== user.id) {
+      throw new ForbiddenException();
+    }
+
+    const pdfBuffer = await this.paymentService.generateInvoicePdf(id);
+
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename=facture-${id}.pdf`,
+      "Content-Length": pdfBuffer.length,
+    });
+
+    res.end(pdfBuffer);
   }
 
   // Seuls les admins peuvent modifier les paiements

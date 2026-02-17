@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { PdfService } from '../../common/services/pdf.service';
 import { PrismaService } from '../../common/services/prisma.service';
 import { ReservationModule } from '../reservation/reservation.module';
 import { UserModule } from '../user/user.module';
@@ -11,7 +12,7 @@ import { PaymentService } from './payment.service';
     ReservationModule, // Pour accéder au ReservationService
   ],
   controllers: [PaymentController],
-  providers: [PaymentService, PrismaService],
+  providers: [PaymentService, PrismaService, PdfService],
   exports: [PaymentService], // Exporter pour utilisation dans d'autres modules
 })
 export class PaymentModule {}

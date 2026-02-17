@@ -225,6 +225,12 @@ export class ReservationService {
           },
         },
         payments: true,
+        quote: true,
+        reservationEquipments: {
+          include: {
+            inventoryItem: true,
+          },
+        },
       },
     });
 
@@ -507,5 +513,110 @@ export class ReservationService {
       endDate,
       status: ReservationStatus.CONFIRMED,
     });
+  }
+
+  /**
+   * Récupère les réservations confirmées avec leur résumé de paiement
+   * Triées par: non soldées d'abord, puis par date de début
+   */
+  async getConfirmedWithPaymentSummary(options?: {
+    skip?: number;
+    take?: number;
+  }) {
+    const { skip = 0, take = 20 } = options || {};
+
+    // Récupérer les réservations confirmées avec leurs paiements
+    const reservations = await this.prisma.reservation.findMany({
+      where: {
+        status: ReservationStatus.CONFIRMED,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            phone: true,
+          },
+        },
+        quote: {
+          select: {
+            id: true,
+            number: true,
+            totalHT: true,
+            totalTTC: true,
+            status: true,
+          },
+        },
+        payments: {
+          select: {
+            id: true,
+            amount: true,
+            type: true,
+            status: true,
+            paidAt: true,
+            createdAt: true,
+          },
+        },
+      },
+      orderBy: { start: "asc" },
+    });
+
+    // Calculer le résumé financier pour chaque réservation
+    const reservationsWithSummary = reservations.map((reservation) => {
+      const totalAmount = reservation.quote?.totalTTC
+        ? Number(reservation.quote.totalTTC)
+        : reservation.estimatedBudget
+          ? Number(reservation.estimatedBudget)
+          : 0;
+
+      const paidAmount = reservation.payments
+        .filter((p) => p.status === "PAID")
+        .reduce((sum, p) => sum + Number(p.amount), 0);
+
+      const pendingAmount = reservation.payments
+        .filter((p) => p.status === "PENDING")
+        .reduce((sum, p) => sum + Number(p.amount), 0);
+
+      const remainingAmount = Math.max(0, totalAmount - paidAmount);
+      const paymentProgress =
+        totalAmount > 0 ? (paidAmount / totalAmount) * 100 : 0;
+      const isFullyPaid = remainingAmount === 0 && totalAmount > 0;
+
+      return {
+        ...reservation,
+        paymentSummary: {
+          totalAmount,
+          paidAmount,
+          pendingAmount,
+          remainingAmount,
+          paymentProgress: Math.round(paymentProgress * 100) / 100,
+          paymentsCount: reservation.payments.length,
+          isFullyPaid,
+        },
+      };
+    });
+
+    // Trier: non soldées d'abord, puis par date
+    reservationsWithSummary.sort((a, b) => {
+      // Non soldées en premier
+      if (a.paymentSummary.isFullyPaid !== b.paymentSummary.isFullyPaid) {
+        return a.paymentSummary.isFullyPaid ? 1 : -1;
+      }
+      // Puis par date de début
+      return new Date(a.start).getTime() - new Date(b.start).getTime();
+    });
+
+    // Pagination
+    const total = reservationsWithSummary.length;
+    const paginatedData = reservationsWithSummary.slice(skip, skip + take);
+
+    return {
+      data: paginatedData,
+      total,
+      skip,
+      take,
+    };
   }
 }

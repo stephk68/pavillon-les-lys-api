@@ -1,17 +1,17 @@
 import {
-  Body,
-  Controller,
-  Delete,
-  ForbiddenException,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Param,
-  ParseUUIDPipe,
-  Patch,
-  Post,
-  Query,
-  UseGuards,
+    Body,
+    Controller,
+    Delete,
+    ForbiddenException,
+    Get,
+    HttpCode,
+    HttpStatus,
+    Param,
+    ParseUUIDPipe,
+    Patch,
+    Post,
+    Query,
+    UseGuards,
 } from "@nestjs/common";
 import { EventType, ReservationStatus, Role } from "@prisma/client";
 import { Roles } from "src/common/decorators/permission.decorator";
@@ -105,6 +105,19 @@ export class ReservationController {
   async getUpcoming(@Query("days") days?: string) {
     const daysNumber = days ? parseInt(days, 10) : 7;
     return this.reservationService.getUpcomingReservations(daysNumber);
+  }
+
+  // Réservations confirmées avec résumé des paiements (pour page paiements)
+  @Roles(Role.ADMIN, Role.EVENT_MANAGER)
+  @Get("confirmed-with-payments")
+  async getConfirmedWithPayments(
+    @Query("skip") skip?: string,
+    @Query("take") take?: string
+  ) {
+    return this.reservationService.getConfirmedWithPaymentSummary({
+      skip: skip ? parseInt(skip, 10) : undefined,
+      take: take ? parseInt(take, 10) : undefined,
+    });
   }
 
   // Utilisateurs peuvent voir leurs propres réservations

@@ -1,11 +1,12 @@
 import { PaymentType } from '@prisma/client';
 import {
-  IsEnum,
-  IsNumber,
-  IsOptional,
-  IsString,
-  IsUUID,
-  Min,
+    IsBoolean,
+    IsEnum,
+    IsNumber,
+    IsOptional,
+    IsString,
+    IsUUID,
+    Min,
 } from 'class-validator';
 
 export class CreatePaymentDto {
@@ -20,10 +21,22 @@ export class CreatePaymentDto {
   reservationId: string;
 
   @IsOptional()
+  @IsUUID()
+  quoteId?: string; // Lien vers le devis
+
+  @IsOptional()
   @IsString()
   description?: string;
 
   @IsOptional()
   @IsString()
   paymentMethodId?: string; // Pour les gateways de paiement
+
+  @IsOptional()
+  @IsString()
+  proofDocument?: string; // URL du justificatif de paiement
+
+  @IsOptional()
+  @IsBoolean()
+  isRefundable?: boolean; // Pour les cautions
 }

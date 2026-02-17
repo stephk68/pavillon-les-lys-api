@@ -1,10 +1,17 @@
 import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
+    BadRequestException,
+    ConflictException,
+    forwardRef,
+    Inject,
+    Injectable,
+    NotFoundException,
 } from "@nestjs/common";
-import { Quote, QuoteItem, QuoteStatus } from "@prisma/client";
+import { Quote, QuoteItem, QuoteStatus, Reservation, ReservationStatus } from "@prisma/client";
+import { PdfService } from "../../common/services/pdf.service";
 import { PrismaService } from "../../common/services/prisma.service";
+import { MailService } from "../../mail/mail.service";
+import { ReservationService } from "../reservation/reservation.service";
+import { ConvertToReservationDto } from "./dto/convert-to-reservation.dto";
 import { CreateQuoteDto } from "./dto/create-quote.dto";
 import { UpdateQuoteDto } from "./dto/update-quote.dto";
 
@@ -12,7 +19,13 @@ type QuoteWithItems = Quote & { items: QuoteItem[] };
 
 @Injectable()
 export class QuoteService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly pdfService: PdfService,
+    private readonly mailService: MailService,
+    @Inject(forwardRef(() => ReservationService))
+    private readonly reservationService: ReservationService
+  ) {}
 
   // --- LOGIQUE MÉTIER ---
 
@@ -28,7 +41,8 @@ export class QuoteService {
       (acc, item) => acc + item.quantity * item.unitPrice,
       0
     );
-    const vatRate = 0.18; // 18%
+    // TVA désactivée pour le moment (vatRate = 0)
+    const vatRate = 0; // 0% - À réactiver ultérieurement si nécessaire
     const taxes = totalHT * vatRate;
     const totalTTC = totalHT + taxes;
 
@@ -133,7 +147,8 @@ export class QuoteService {
       );
     }
 
-    const { items, validUntil, ...rest } = updateQuoteDto;
+    // Exclure les champs qui ne peuvent pas être mis à jour directement via Prisma
+    const { items, validUntil, userId, reservationId, eventDetails, ...rest } = updateQuoteDto;
 
     // Si on met à jour les items, on recalcule tout
     let financialData = {};
@@ -157,14 +172,22 @@ export class QuoteService {
       };
     }
 
+    // Construire l'objet data pour Prisma
+    const updateData: any = {
+      ...rest,
+      validUntil: validUntil ? new Date(validUntil) : undefined,
+      ...financialData,
+      ...itemsOperation,
+    };
+
+    // Gérer eventDetails si fourni (c'est un champ JSON)
+    if (eventDetails !== undefined) {
+      updateData.eventDetails = eventDetails;
+    }
+
     return this.prisma.quote.update({
       where: { id },
-      data: {
-        ...rest,
-        validUntil: validUntil ? new Date(validUntil) : undefined,
-        ...financialData,
-        ...itemsOperation,
-      },
+      data: updateData,
       include: { items: true },
     });
   }
@@ -320,5 +343,303 @@ export class QuoteService {
       exportDate: new Date(),
       format: "json", // À adapter selon vos besoins
     };
+  }
+
+  /**
+   * Génère un PDF pour le devis
+   */
+  async generatePdf(id: string): Promise<Buffer> {
+    const quote = await this.prisma.quote.findUnique({
+      where: { id },
+      include: {
+        items: true,
+        user: {
+          select: {
+            firstName: true,
+            lastName: true,
+            email: true,
+            phone: true,
+          },
+        },
+        reservation: true,
+      },
+    });
+
+    if (!quote) {
+      throw new NotFoundException(`Devis ${id} introuvable`);
+    }
+
+    const formatDate = (date: Date) =>
+      new Date(date).toLocaleDateString("fr-FR", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      });
+
+    const clientName = quote.user
+      ? `${quote.user.firstName || ""} ${quote.user.lastName || ""}`.trim() ||
+        "Client"
+      : "Client";
+
+    const pdfData = {
+      number: quote.number,
+      date: formatDate(quote.createdAt),
+      validUntil: formatDate(quote.validUntil),
+      client: {
+        name: clientName,
+        email: quote.user?.email,
+        phone: quote.user?.phone,
+      },
+      items: quote.items.map((item) => ({
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPrice),
+        totalPrice: Number(item.totalPrice),
+      })),
+      totalHT: Number(quote.totalHT),
+      vatRate: Number(quote.vatRate),
+      totalTTC: Number(quote.totalTTC),
+      notes:
+        "Conditions de paiement: 30% à la commande, solde avant l'événement. Annulation gratuite jusqu'à 30 jours avant l'événement.",
+    };
+
+    return this.pdfService.generateQuotePdf(pdfData);
+  }
+
+  /**
+   * Envoie le devis par email avec le PDF en pièce jointe
+   */
+  async sendQuoteWithPdf(id: string, recipientEmail?: string): Promise<Quote> {
+    const quote = await this.prisma.quote.findUnique({
+      where: { id },
+      include: {
+        items: true,
+        user: {
+          select: {
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        reservation: true,
+      },
+    });
+
+    if (!quote) {
+      throw new NotFoundException(`Devis ${id} introuvable`);
+    }
+
+    if (
+      quote.status !== QuoteStatus.DRAFT &&
+      quote.status !== QuoteStatus.SENT
+    ) {
+      throw new BadRequestException(
+        "Seuls les brouillons ou devis déjà envoyés peuvent être (ré)envoyés"
+      );
+    }
+
+    // Générer le PDF
+    const pdfBuffer = await this.generatePdf(id);
+
+    // Déterminer le destinataire
+    const email = recipientEmail || quote.user?.email;
+    if (!email) {
+      throw new BadRequestException(
+        "Aucune adresse email disponible pour l'envoi"
+      );
+    }
+
+    // Envoyer l'email avec le PDF en pièce jointe
+    await this.mailService.sendQuoteWithAttachment(
+      {
+        email,
+        firstName: quote.user?.firstName || "Client",
+        lastName: quote.user?.lastName || "",
+      },
+      {
+        id: quote.id,
+        reference: quote.number,
+        createdAt: quote.createdAt,
+        items: quote.items,
+        totalHT: Number(quote.totalHT),
+        totalTTC: Number(quote.totalTTC),
+        notes: "",
+      },
+      pdfBuffer
+    );
+
+    // Mettre à jour le statut du devis
+    return this.prisma.quote.update({
+      where: { id },
+      data: { status: QuoteStatus.SENT },
+      include: {
+        items: true,
+        user: true,
+        reservation: true,
+      },
+    });
+  }
+
+  // ============================================================================
+  // SALES FUNNEL - Méthodes pour le workflow flexible
+  // ============================================================================
+
+  /**
+   * Crée un devis standalone (sans réservation)
+   * Stocke les détails de l'événement dans eventDetails pour conversion ultérieure
+   */
+  async createStandalone(createQuoteDto: CreateQuoteDto): Promise<Quote> {
+    const { userId, items, validUntil, eventDetails } = createQuoteDto;
+
+    if (!eventDetails) {
+      throw new BadRequestException(
+        "eventDetails est requis pour un devis standalone (mode Funnel)"
+      );
+    }
+
+    // Validation des dates de l'événement
+    const desiredStart = new Date(eventDetails.desiredStartDate);
+    const desiredEnd = new Date(eventDetails.desiredEndDate);
+
+    if (desiredEnd <= desiredStart) {
+      throw new BadRequestException(
+        "La date de fin souhaitée doit être après la date de début"
+      );
+    }
+
+    // Calculs financiers
+    const { totalHT, totalTTC } = this.calculateTotals(items);
+
+    // Construire les données (cast en any car eventDetails/version pas encore dans le type Prisma)
+    const quoteData: any = {
+      number: this.generateQuoteNumber(),
+      userId,
+      reservationId: null, // Pas de réservation pour un devis standalone
+      eventDetails: eventDetails, // Stockage JSON
+      validUntil: new Date(validUntil),
+      status: QuoteStatus.DRAFT,
+      version: 1,
+      totalHT,
+      vatRate: 0,
+      totalTTC,
+      items: {
+        create: items.map((item) => ({
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          totalPrice: item.quantity * item.unitPrice,
+        })),
+      },
+    };
+
+    const quote = await this.prisma.quote.create({
+      data: quoteData,
+      include: {
+        items: true,
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    return quote;
+  }
+
+  /**
+   * Convertit un devis ACCEPTED en réservation
+   * Vérifie la disponibilité et crée la réservation avec les données du devis
+   */
+  async convertToReservation(
+    quoteId: string,
+    dto?: ConvertToReservationDto
+  ): Promise<Reservation> {
+    const quote = await this.findOne(quoteId);
+
+    // Vérification du statut
+    if (quote.status !== QuoteStatus.ACCEPTED) {
+      throw new BadRequestException(
+        "Seul un devis avec le statut ACCEPTED peut être converti en réservation"
+      );
+    }
+
+    // Vérification qu'il n'y a pas déjà une réservation liée
+    if (quote.reservationId) {
+      throw new BadRequestException(
+        "Ce devis est déjà lié à une réservation existante"
+      );
+    }
+
+    // Vérification des eventDetails (cast nécessaire car migration non encore exécutée)
+    const quoteData = quote as any;
+    if (!quoteData.eventDetails) {
+      throw new BadRequestException(
+        "Ce devis ne contient pas de détails d'événement (eventDetails). Impossible de le convertir."
+      );
+    }
+
+    const details = quoteData.eventDetails as {
+      eventType: string;
+      desiredStartDate: string;
+      desiredEndDate: string;
+      attendees: number;
+    };
+
+    const startDate = new Date(details.desiredStartDate);
+    const endDate = new Date(details.desiredEndDate);
+
+    // Vérifier la disponibilité des dates
+    const isAvailable = await this.reservationService.checkAvailability(
+      startDate,
+      endDate
+    );
+
+    if (!isAvailable) {
+      throw new ConflictException(
+        "Les dates souhaitées ne sont plus disponibles. Veuillez proposer de nouvelles dates au client."
+      );
+    }
+
+    // Transaction : créer la réservation + mettre à jour le devis
+    return this.prisma.$transaction(async (tx) => {
+      // Créer la réservation
+      const reservation = await tx.reservation.create({
+        data: {
+          userId: quote.userId,
+          eventType: details.eventType as any,
+          start: startDate,
+          end: endDate,
+          attendees: details.attendees,
+          status: ReservationStatus.CONFIRMED, // Directement confirmée car devis accepté
+          estimatedBudget: quote.totalTTC,
+          description: dto?.description,
+          specialRequests: dto?.specialRequests,
+          quoteId: quote.id,
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+              phone: true,
+            },
+          },
+        },
+      });
+
+      // Mettre à jour le devis avec le lien vers la réservation
+      await tx.quote.update({
+        where: { id: quoteId },
+        data: { reservationId: reservation.id },
+      });
+
+      return reservation;
+    });
   }
 }

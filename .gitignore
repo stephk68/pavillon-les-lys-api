@@ -66,6 +66,8 @@ docker-compose.override.yml
 *.sqlite3
 database.db
 prisma/.env
+*.sql
+!prisma/migrations/**/*.sql
 
 # Package managers
 yarn.lock
