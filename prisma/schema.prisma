@@ -1,18 +1,16 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// Pavillon Les Lys — Prisma Schema
+// Refactored: "Dossier Événement Unique" model
 
 generator client {
   provider = "prisma-client-js"
-  // output   = "../generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+// ==================== USER ====================
 
 model User {
   id           String        @id @default(uuid())
@@ -24,109 +22,118 @@ model User {
   role         Role          @default(CLIENT)
   isFirstLogin Boolean       @default(true)
   lastLoginAt  DateTime?
-  reservations Reservation[]
+  eventFolders EventFolder[]
   payments     Payment[]
   feedbacks    Feedback[]
-  quotes       Quote[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   createdBy    String?
   updatedBy    String?
 }
 
-model Reservation {
-  id                    String                  @id @default(uuid())
-  user                  User                    @relation(fields: [userId], references: [id])
-  userId                String
-  eventType             EventType
-  start                 DateTime
-  end                   DateTime
-  attendees             Int
-  status                ReservationStatus       @default(PENDING)
-  description           String?
-  specialRequests       String?
-  estimatedBudget       Decimal?                @db.Decimal(10, 2)
-  quoteId               String?                 @unique
-  quote                 Quote?                  @relation(fields: [quoteId], references: [id])
-  payments              Payment[]
-  checklist             ChecklistItem[]
-  Feedback              Feedback[]
-  reservationEquipments ReservationEquipment[] // Relation Many-to-Many avec InventoryItem
-  createdAt             DateTime                @default(now())
-  updatedAt             DateTime                @updatedAt
-  createdBy             String?
-  updatedBy             String?
+// ==================== EVENT FOLDER (fusion Reservation + Quote) ====================
+
+model EventFolder {
+  id              String            @id @default(uuid())
+  folderNumber    String            @unique @map("number") // EVT-2026-XXXX
+  user            User              @relation(fields: [userId], references: [id])
+  userId          String
+
+  // Event info
+  eventType       EventType
+  start           DateTime
+  end             DateTime
+  attendees       Int
+  description     String?
+  specialRequests String?
+
+  // Status — cycle de vie unique
+  status          EventStatus       @default(PROSPECT)
+
+  // Financial — items de devis intégrés
+  items           EventFolderItem[]
+  totalHT         Decimal           @default(0) @db.Decimal(10, 2)
+  vatRate         Decimal           @default(0) @db.Decimal(5, 2)
+  totalTTC        Decimal           @default(0) @db.Decimal(10, 2)
+  validUntil      DateTime?
+
+  // Versioning
+  version         Int               @default(1)
+
+  // Reminder flags
+  reminderJ21SentAt DateTime?
+  reminderJ14SentAt DateTime?
+  contractSentAt    DateTime?
+
+  // Relations
+  payments        Payment[]
+  checklist       ChecklistItem[]
+  feedbacks       Feedback[]
+  equipments      EventEquipment[]
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  createdBy       String?
+  updatedBy       String?
+
+  @@index([userId])
+  @@index([status])
+  @@index([start, end])
 }
+
+model EventFolderItem {
+  id            String      @id @default(uuid())
+  eventFolder   EventFolder @relation(fields: [eventFolderId], references: [id], onDelete: Cascade)
+  eventFolderId String
+  description   String
+  quantity      Int
+  unitPrice     Decimal     @db.Decimal(10, 2)
+  totalPrice    Decimal     @db.Decimal(10, 2)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([eventFolderId])
+}
+
+// ==================== PAYMENT ====================
 
 model Payment {
   id             String        @id @default(uuid())
-  reservation    Reservation   @relation(fields: [reservationId], references: [id])
-  reservationId  String
-  quote          Quote?        @relation(fields: [quoteId], references: [id])
-  quoteId        String?
+  eventFolder    EventFolder   @relation(fields: [eventFolderId], references: [id])
+  eventFolderId  String
+  user           User?         @relation(fields: [userId], references: [id])
+  userId         String?
   amount         Decimal       @db.Decimal(10, 2)
   currency       String        @default("XOF")
   type           PaymentType   // ACOMPTE | SOLDE | CAUTION
-  status         PaymentStatus // PENDING | PAID | REFUNDED
+  status         PaymentStatus @default(PENDING)
   dueDate        DateTime?
   paidAt         DateTime?
-  proofDocument  String?       // URL du justificatif de paiement
-  // Champs pour gestion des cautions
+  proofDocument  String?
   isRefundable   Boolean       @default(false)
   refundedAmount Decimal?      @db.Decimal(10, 2)
   refundedAt     DateTime?
-  User           User?         @relation(fields: [userId], references: [id])
-  userId         String?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
   createdBy      String?
   updatedBy      String?
+
+  @@index([eventFolderId])
+  @@index([status])
 }
 
-model Quote {
-  id            String       @id @default(uuid())
-  number        String       @unique
-  user          User         @relation(fields: [userId], references: [id])
-  userId        String
-  reservation   Reservation?
-  reservationId String?      // Optionnel - liaison post-conversion pour mode Funnel
-  items         QuoteItem[]
-  payments      Payment[]    // Paiements liés à ce devis
-  totalHT       Decimal      @db.Decimal(10, 2)
-  vatRate       Decimal      @default(0) @db.Decimal(5, 2) // TVA désactivée
-  totalTTC      Decimal      @db.Decimal(10, 2)
-  validUntil    DateTime
-  status        QuoteStatus  @default(DRAFT)
-  version       Int          @default(1) // Versioning du devis
-  eventDetails  Json?        // {eventType, desiredStartDate, desiredEndDate, attendees} - pour devis standalone
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  createdBy     String?
-  updatedBy     String?
-}
-
-model QuoteItem {
-  id          String   @id @default(uuid())
-  quote       Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
-  quoteId     String
-  description String
-  quantity    Int
-  unitPrice   Decimal  @db.Decimal(10, 2)
-  totalPrice  Decimal  @db.Decimal(10, 2)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-}
+// ==================== CHECKLIST ====================
 
 model ChecklistItem {
   id            String      @id @default(uuid())
-  reservation   Reservation @relation(fields: [reservationId], references: [id])
-  reservationId String
+  eventFolder   EventFolder @relation(fields: [eventFolderId], references: [id], onDelete: Cascade)
+  eventFolderId String
   title         String
-  description   String?                  // Description détaillée de la tâche
+  description   String?
   completed     Boolean     @default(false)
-  completedAt   DateTime?                // Date de complétion
-  notes         String?                  // Notes lors de la complétion
-  displayOrder  Int         @default(0)  // Ordre d'affichage
+  completedAt   DateTime?
+  notes         String?
+  displayOrder  Int         @default(0)
   assignedTo    String?
   dueAt         DateTime?
   createdAt     DateTime    @default(now())
@@ -134,20 +141,22 @@ model ChecklistItem {
   createdBy     String?
   updatedBy     String?
 
-  @@index([reservationId])
+  @@index([eventFolderId])
 }
+
+// ==================== FEEDBACK ====================
 
 model Feedback {
   id            String       @id @default(uuid())
   user          User         @relation(fields: [userId], references: [id])
   userId        String
-  reservationId String?
-  reservation   Reservation? @relation(fields: [reservationId], references: [id])
+  eventFolder   EventFolder? @relation(fields: [eventFolderId], references: [id])
+  eventFolderId String?
   rating        Int          @default(5)
   comment       String?
-  isRead        Boolean      @default(false)  // Feedback lu par l'admin
-  response      String?                       // Réponse de l'admin
-  respondedAt   DateTime?                     // Date de la réponse
+  isRead        Boolean      @default(false)
+  response      String?
+  respondedAt   DateTime?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
   createdBy     String?
@@ -157,45 +166,45 @@ model Feedback {
   @@index([isRead])
 }
 
-// ==================== INVENTORY MANAGEMENT ====================
+// ==================== INVENTORY ====================
 
 model InventoryItem {
-  id                    String                  @id @default(uuid())
-  name                  String // Ex: "Chaise Napoléon", "Table Ronde 8 Places"
-  description           String? // Description détaillée
-  image                 String? // URL de l'image
-  type                  InventoryItemType // INTERNAL (notre matériel) | EXTERNAL_PROVIDER (prestataire)
-  category              String? // Ex: "Mobilier", "Décoration", "Sonorisation"
-  providerName          String? // Nom du prestataire (si type = EXTERNAL_PROVIDER)
-  providerContact       String? // Email/Téléphone du prestataire
-  totalStock            Int                     @default(0) // Stock total (uniquement pour INTERNAL)
-  availableStock        Int                     @default(0) // Stock disponible (calculé)
-  status                InventoryItemStatus     @default(AVAILABLE) // AVAILABLE | MAINTENANCE | LOST
-  unitPrice             Decimal?                @db.Decimal(10, 2) // Prix unitaire (optionnel)
-  reservationEquipments ReservationEquipment[] // Relation Many-to-Many avec Reservation
-  createdAt             DateTime                @default(now())
-  updatedAt             DateTime                @updatedAt
-  createdBy             String?
-  updatedBy             String?
+  id              String              @id @default(uuid())
+  name            String
+  description     String?
+  image           String?
+  type            InventoryItemType
+  category        String?
+  providerName    String?
+  providerContact String?
+  totalStock      Int                 @default(0)
+  availableStock  Int                 @default(0)
+  status          InventoryItemStatus @default(AVAILABLE)
+  unitPrice       Decimal?            @db.Decimal(10, 2)
+  eventEquipments EventEquipment[]
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  createdBy       String?
+  updatedBy       String?
 
-  @@index([type, status]) // Index pour filtrer rapidement
+  @@index([type, status])
   @@index([category])
 }
 
-model ReservationEquipment {
+model EventEquipment {
   id               String        @id @default(uuid())
-  reservation      Reservation   @relation(fields: [reservationId], references: [id], onDelete: Cascade)
-  reservationId    String
+  eventFolder      EventFolder   @relation(fields: [eventFolderId], references: [id], onDelete: Cascade)
+  eventFolderId    String
   inventoryItem    InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
   inventoryItemId  String
-  quantityReserved Int // Quantité sortie pour cet événement
-  returnedQuantity Int           @default(0) // Quantité rendue (pour gérer la casse/perte)
-  notes            String? // Notes sur l'état du matériel (dégâts, etc.)
+  quantityReserved Int
+  returnedQuantity Int           @default(0)
+  notes            String?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
-  @@unique([reservationId, inventoryItemId]) // Un item ne peut être lié qu'une fois par réservation
-  @@index([reservationId])
+  @@unique([eventFolderId, inventoryItemId])
+  @@index([eventFolderId])
   @@index([inventoryItemId])
 }
 
@@ -207,11 +216,13 @@ enum Role {
   CLIENT
 }
 
-enum ReservationStatus {
-  PENDING
-  CONFIRMED
-  CANCELED
-  COMPLETED
+enum EventStatus {
+  PROSPECT   // Visite à faire, premier contact
+  QUOTED     // Devis/contrat envoyé, en attente de signature
+  BOOKED     // Acompte 50% reçu, contrat signé
+  READY      // Solde & caution reçus, inventaire validé
+  COMPLETED  // Événement terminé, inventaire post-event OK
+  CANCELLED  // Annulé
 }
 
 enum PaymentType {
@@ -226,13 +237,6 @@ enum PaymentStatus {
   REFUNDED
 }
 
-enum QuoteStatus {
-  DRAFT
-  SENT
-  ACCEPTED
-  REJECTED
-}
-
 enum EventType {
   MARIAGE
   ANNIVERSAIRE
@@ -241,12 +245,12 @@ enum EventType {
 }
 
 enum InventoryItemType {
-  INTERNAL          // Matériel en interne (propriété de la salle)
-  EXTERNAL_PROVIDER // Matériel fourni par un prestataire externe
+  INTERNAL
+  EXTERNAL_PROVIDER
 }
 
 enum InventoryItemStatus {
-  AVAILABLE   // Disponible à la location
-  MAINTENANCE // En maintenance/réparation
-  LOST        // Perdu/Cassé (plus disponible)
+  AVAILABLE
+  MAINTENANCE
+  LOST
 }

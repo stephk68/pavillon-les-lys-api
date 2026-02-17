@@ -1,9 +1,9 @@
 import {
-    IsDateString,
-    IsNotEmpty,
-    IsOptional,
-    IsString,
-    IsUUID,
+  IsDateString,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
 } from "class-validator";
 
 export class CreateChekclistItemDto {
@@ -16,7 +16,7 @@ export class CreateChekclistItemDto {
   description?: string;
 
   @IsUUID()
-  reservationId: string;
+  eventFolderId: string;
 
   @IsOptional()
   @IsUUID()

@@ -48,9 +48,9 @@ export class InventoryService {
     const items = await this.prisma.inventoryItem.findMany({
       where,
       include: {
-        reservationEquipments: {
+        eventEquipments: {
           include: {
-            reservation: {
+            eventFolder: {
               select: {
                 id: true,
                 start: true,
@@ -72,11 +72,11 @@ export class InventoryService {
 
       // Pour le matériel interne, calculer le stock disponible
       if (item.type === InventoryItemType.INTERNAL) {
-        const reservedQuantity = item.reservationEquipments
+        const reservedQuantity = item.eventEquipments
           .filter(
             (re) =>
-              re.reservation.status !== "CANCELED" &&
-              re.reservation.status !== "COMPLETED"
+              re.eventFolder.status !== "CANCELLED" &&
+              re.eventFolder.status !== "COMPLETED",
           )
           .reduce((sum, re) => sum + re.quantityReserved, 0);
 
@@ -97,9 +97,9 @@ export class InventoryService {
     const item = await this.prisma.inventoryItem.findUnique({
       where: { id },
       include: {
-        reservationEquipments: {
+        eventEquipments: {
           include: {
-            reservation: {
+            eventFolder: {
               select: {
                 id: true,
                 start: true,
@@ -136,7 +136,7 @@ export class InventoryService {
       !data.providerName
     ) {
       throw new BadRequestException(
-        "Le nom du prestataire est requis pour le matériel externe"
+        "Le nom du prestataire est requis pour le matériel externe",
       );
     }
 
@@ -146,7 +146,7 @@ export class InventoryService {
       (!data.totalStock || data.totalStock <= 0)
     ) {
       throw new BadRequestException(
-        "Le stock total doit être supérieur à 0 pour le matériel interne"
+        "Le stock total doit être supérieur à 0 pour le matériel interne",
       );
     }
 
@@ -171,7 +171,7 @@ export class InventoryService {
       !item.providerName
     ) {
       throw new BadRequestException(
-        "Le nom du prestataire est requis pour le matériel externe"
+        "Le nom du prestataire est requis pour le matériel externe",
       );
     }
 
@@ -187,16 +187,17 @@ export class InventoryService {
   async delete(id: string) {
     const item = await this.findOne(id);
 
-    // Vérifier si l'équipement est utilisé dans des réservations actives
-    const activeReservations = item.reservationEquipments.filter(
+    // Vérifier si l'équipement est utilisé dans des dossiers actifs
+    const activeFolders = item.eventEquipments.filter(
       (re) =>
-        re.reservation.status === "CONFIRMED" ||
-        re.reservation.status === "PENDING"
+        re.eventFolder.status === "BOOKED" ||
+        re.eventFolder.status === "QUOTED" ||
+        re.eventFolder.status === "READY",
     );
 
-    if (activeReservations.length > 0) {
+    if (activeFolders.length > 0) {
       throw new BadRequestException(
-        `Impossible de supprimer : cet équipement est utilisé dans ${activeReservations.length} réservation(s) active(s)`
+        `Impossible de supprimer : cet équipement est utilisé dans ${activeFolders.length} dossier(s) actif(s)`,
       );
     }
 
@@ -220,35 +221,34 @@ export class InventoryService {
       };
     }
 
-    // Pour le matériel interne, calculer les réservations qui se chevauchent
-    const overlappingReservations =
-      await this.prisma.reservationEquipment.findMany({
-        where: {
-          inventoryItemId: id,
-          reservation: {
-            status: {
-              in: ["PENDING", "CONFIRMED"],
-            },
-            OR: [
-              {
-                start: {
-                  lte: end,
-                },
-                end: {
-                  gte: start,
-                },
-              },
-            ],
+    // Pour le matériel interne, calculer les dossiers qui se chevauchent
+    const overlappingEquipments = await this.prisma.eventEquipment.findMany({
+      where: {
+        inventoryItemId: id,
+        eventFolder: {
+          status: {
+            in: ["QUOTED", "BOOKED", "READY"],
           },
+          OR: [
+            {
+              start: {
+                lte: end,
+              },
+              end: {
+                gte: start,
+              },
+            },
+          ],
         },
-        include: {
-          reservation: true,
-        },
-      });
+      },
+      include: {
+        eventFolder: true,
+      },
+    });
 
-    const reservedQuantity = overlappingReservations.reduce(
+    const reservedQuantity = overlappingEquipments.reduce(
       (sum, re) => sum + re.quantityReserved,
-      0
+      0,
     );
 
     const availableQuantity = item.totalStock - reservedQuantity;
@@ -258,10 +258,10 @@ export class InventoryService {
       totalStock: item.totalStock,
       reservedQuantity,
       availableQuantity,
-      overlappingReservations: overlappingReservations.map((re) => ({
-        reservationId: re.reservation.id,
-        start: re.reservation.start,
-        end: re.reservation.end,
+      overlappingFolders: overlappingEquipments.map((re) => ({
+        eventFolderId: re.eventFolder.id,
+        start: re.eventFolder.start,
+        end: re.eventFolder.end,
         quantity: re.quantityReserved,
       })),
     };
@@ -295,14 +295,14 @@ export class InventoryService {
           ...acc,
           [item.type]: item._count,
         }),
-        {}
+        {},
       ),
       byStatus: itemsByStatus.reduce(
         (acc, item) => ({
           ...acc,
           [item.status]: item._count,
         }),
-        {}
+        {},
       ),
       byCategory: itemsByCategory.map((item) => ({
         category: item.category,

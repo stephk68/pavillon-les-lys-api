@@ -15,7 +15,7 @@ export class UserService {
   constructor(private readonly prisma: PrismaService) {}
 
   async register(
-    createUserDto: CreateUserDto
+    createUserDto: CreateUserDto,
   ): Promise<Omit<User, "password">> {
     // Vérifier si l'utilisateur existe déjà
     const existingUser = await this.prisma.user.findUnique({
@@ -30,7 +30,7 @@ export class UserService {
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(
       createUserDto.password,
-      saltRounds
+      saltRounds,
     );
 
     // Créer l'utilisateur avec le rôle CLIENT par défaut
@@ -60,7 +60,7 @@ export class UserService {
   }
 
   async createStaff(
-    createUserDto: CreateUserDto
+    createUserDto: CreateUserDto,
   ): Promise<Omit<User, "password">> {
     // Vérifier si l'utilisateur existe déjà
     const existingUser = await this.prisma.user.findUnique({
@@ -84,7 +84,7 @@ export class UserService {
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(
       createUserDto.password,
-      saltRounds
+      saltRounds,
     );
 
     // Créer l'utilisateur staff
@@ -166,9 +166,10 @@ export class UserService {
         updatedAt: true,
         createdBy: true,
         updatedBy: true,
-        reservations: {
+        eventFolders: {
           select: {
             id: true,
+            folderNumber: true,
             eventType: true,
             start: true,
             end: true,
@@ -195,7 +196,7 @@ export class UserService {
 
   async update(
     id: string,
-    updateUserDto: UpdateUserDto
+    updateUserDto: UpdateUserDto,
   ): Promise<Omit<User, "password">> {
     // Vérifier si l'utilisateur existe
     await this.findOne(id);
@@ -236,7 +237,7 @@ export class UserService {
   async updatePassword(
     id: string,
     currentPassword: string,
-    newPassword: string
+    newPassword: string,
   ): Promise<void> {
     const user = await this.prisma.user.findUnique({
       where: { id },
@@ -249,7 +250,7 @@ export class UserService {
     // Vérifier le mot de passe actuel
     const isCurrentPasswordValid = await bcrypt.compare(
       currentPassword,
-      user.password
+      user.password,
     );
     if (!isCurrentPasswordValid) {
       throw new BadRequestException("Le mot de passe actuel est incorrect");
@@ -269,17 +270,17 @@ export class UserService {
     // Vérifier si l'utilisateur existe
     await this.findOne(id);
 
-    // Vérifier s'il a des réservations actives
-    const activeReservations = await this.prisma.reservation.findMany({
+    // Vérifier s'il a des dossiers événement actifs
+    const activeFolders = await this.prisma.eventFolder.findMany({
       where: {
         userId: id,
-        status: { in: ["PENDING", "CONFIRMED"] },
+        status: { in: ["QUOTED", "BOOKED", "READY"] },
       },
     });
 
-    if (activeReservations.length > 0) {
+    if (activeFolders.length > 0) {
       throw new BadRequestException(
-        "Impossible de supprimer cet utilisateur car il a des réservations actives"
+        "Impossible de supprimer cet utilisateur car il a des dossiers événement actifs",
       );
     }
 
@@ -291,7 +292,7 @@ export class UserService {
   async getUserStats(id: string) {
     const user = await this.findOne(id);
 
-    const stats = await this.prisma.reservation.groupBy({
+    const stats = await this.prisma.eventFolder.groupBy({
       by: ["status"],
       where: { userId: id },
       _count: true,
@@ -299,7 +300,7 @@ export class UserService {
 
     const totalSpent = await this.prisma.payment.aggregate({
       where: {
-        userId: id,
+        eventFolder: { userId: id },
         status: "PAID",
       },
       _sum: {
@@ -309,7 +310,7 @@ export class UserService {
 
     return {
       user,
-      reservationStats: stats,
+      eventFolderStats: stats,
       totalSpent: totalSpent._sum.amount || 0,
     };
   }
@@ -351,7 +352,7 @@ export class UserService {
 
   async validatePassword(
     password: string,
-    hashedPassword: string
+    hashedPassword: string,
   ): Promise<boolean> {
     return bcrypt.compare(password, hashedPassword);
   }

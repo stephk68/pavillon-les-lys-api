@@ -1,0 +1,98 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        color: #333;
+        max-width: 600px;
+        margin: 0 auto;
+      }
+      .header {
+        background: #2c3e50;
+        color: white;
+        padding: 20px;
+        text-align: center;
+      }
+      .content {
+        padding: 20px;
+      }
+      .footer {
+        background: #f8f9fa;
+        padding: 15px;
+        text-align: center;
+        font-size: 12px;
+        color: #666;
+      }
+      .btn {
+        display: inline-block;
+        background: #c8a97e;
+        color: white;
+        padding: 12px 24px;
+        text-decoration: none;
+        border-radius: 4px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 15px 0;
+      }
+      th,
+      td {
+        padding: 8px 12px;
+        text-align: left;
+        border-bottom: 1px solid #eee;
+      }
+      th {
+        background: #f8f9fa;
+      }
+      .total {
+        font-weight: bold;
+        font-size: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>Pavillon Les Lys</h1>
+      <p>Votre Contrat</p>
+    </div>
+    <div class="content">
+      <p>Bonjour {{firstName}} {{lastName}},</p>
+      <p>Veuillez trouver ci-joint votre contrat pour votre événement au
+        Pavillon Les Lys.</p>
+
+      <h3>Détails du dossier</h3>
+      <table>
+        <tr><td><strong>N° Dossier</strong></td><td
+          >{{folder.folderNumber}}</td></tr>
+        <tr><td><strong>Type d'événement</strong></td><td
+          >{{folder.eventType}}</td></tr>
+        <tr><td><strong>Date de début</strong></td><td
+          >{{folder.start}}</td></tr>
+        <tr><td><strong>Date de fin</strong></td><td>{{folder.end}}</td></tr>
+        <tr><td><strong>Nombre d'invités</strong></td><td
+          >{{folder.attendees}}</td></tr>
+      </table>
+
+      <table>
+        <tr><td><strong>Total HT</strong></td><td>{{folder.totalHT}}
+            FCFA</td></tr>
+        <tr class="total"><td><strong>Total TTC</strong></td><td
+          >{{folder.totalTTC}} FCFA</td></tr>
+      </table>
+
+      {{#if folder.notes}}
+        <p><strong>Notes :</strong> {{folder.notes}}</p>
+      {{/if}}
+
+      <p style="text-align: center; margin-top: 30px;">
+        <a href="{{dashboardUrl}}" class="btn">Voir mon dossier</a>
+      </p>
+    </div>
+    <div class="footer">
+      <p>Pavillon Les Lys — Espace événementiel</p>
+      <p>Cet email a été envoyé automatiquement, merci de ne pas y répondre.</p>
+    </div>
+  </body>
+</html>

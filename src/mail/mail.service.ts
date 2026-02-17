@@ -1,63 +1,78 @@
 import { MailerService } from "@nestjs-modules/mailer";
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 
 @Injectable()
 export class MailService {
+  private readonly logger = new Logger(MailService.name);
+
   constructor(private readonly mailerService: MailerService) {}
 
   /**
-   * Envoie un email de devis au client
-   * @param user Utilisateur destinataire
-   * @param quote Données du devis
+   * Envoie un email de contrat au client (remplace l'ancien sendQuote)
    */
-  async sendQuote(user: any, quote: any): Promise<void> {
+  async sendContract(
+    user: { email: string; firstName: string; lastName: string },
+    eventFolder: any,
+    pdfBuffer?: Buffer,
+  ): Promise<void> {
     const { email, firstName, lastName } = user;
 
     try {
+      const attachments = pdfBuffer
+        ? [
+            {
+              filename: `Contrat-${eventFolder.folderNumber}.pdf`,
+              content: pdfBuffer,
+              contentType: "application/pdf",
+            },
+          ]
+        : [];
+
       await this.mailerService.sendMail({
         to: email,
-        subject: `Votre devis Pavillon Les Lys - Réf. ${quote.reference}`,
-        template: "./quote",
+        subject: `Votre contrat Pavillon Les Lys - ${eventFolder.folderNumber}`,
+        template: "./contract",
         context: {
           firstName,
           lastName,
-          quote: {
-            reference: quote.reference,
-            date: new Date(quote.createdAt).toLocaleDateString("fr-FR", {
+          folder: {
+            folderNumber: eventFolder.folderNumber,
+            eventType: eventFolder.eventType,
+            start: new Date(eventFolder.start).toLocaleDateString("fr-FR", {
+              weekday: "long",
               day: "numeric",
               month: "long",
               year: "numeric",
             }),
-            items: quote.items,
-            totalHT: quote.totalHT.toFixed(2),
-            totalTTC: quote.totalTTC.toFixed(2),
-            tva: (
-              ((quote.totalTTC - quote.totalHT) / quote.totalHT) *
-              100
-            ).toFixed(0),
-            notes: quote.notes || "",
+            end: new Date(eventFolder.end).toLocaleDateString("fr-FR", {
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            }),
+            attendees: eventFolder.attendees,
+            totalHT: eventFolder.totalHT?.toFixed(2) || "0.00",
+            totalTTC: eventFolder.totalTTC?.toFixed(2) || "0.00",
+            notes: eventFolder.notes || "",
           },
-          downloadUrl: `${process.env.FRONTEND_URL}/dashboard/quotes/${quote.id}/download`,
+          dashboardUrl: `${process.env.FRONTEND_URL}/dashboard/event-folders/${eventFolder.id}`,
         },
+        attachments,
       });
 
-      console.log(`✉️ Email de devis envoyé à ${email}`);
+      this.logger.log(`✉️ Contrat envoyé à ${email}`);
     } catch (error) {
-      console.error(`❌ Erreur lors de l'envoi du devis à ${email}:`, error);
-      throw new Error(
-        `Impossible d'envoyer l'email de devis: ${error.message}`
-      );
+      this.logger.error(`❌ Erreur envoi contrat à ${email}: ${error.message}`);
+      throw new Error(`Impossible d'envoyer le contrat: ${error.message}`);
     }
   }
 
   /**
-   * Envoie un email de confirmation de réservation
-   * @param user Utilisateur destinataire
-   * @param reservation Données de la réservation
+   * Envoie un email de confirmation de réservation (passage en BOOKED)
    */
-  async sendReservationConfirmation(
-    user: any,
-    reservation: any
+  async sendBookingConfirmation(
+    user: { email: string; firstName: string; lastName: string },
+    eventFolder: any,
   ): Promise<void> {
     const { email, firstName, lastName } = user;
 
@@ -65,45 +80,36 @@ export class MailService {
       await this.mailerService.sendMail({
         to: email,
         subject: `Confirmation de votre réservation au Pavillon Les Lys`,
-        template: "./reservation-confirmation",
+        template: "./booking-confirmation",
         context: {
           firstName,
           lastName,
-          reservation: {
-            id: reservation.id,
-            eventDate: new Date(reservation.eventDate).toLocaleDateString(
-              "fr-FR",
-              {
-                weekday: "long",
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              }
-            ),
-            eventType: reservation.eventType,
-            guestCount: reservation.guestCount,
-            status: reservation.status,
+          folder: {
+            folderNumber: eventFolder.folderNumber,
+            eventType: eventFolder.eventType,
+            start: new Date(eventFolder.start).toLocaleDateString("fr-FR", {
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            }),
+            attendees: eventFolder.attendees,
           },
-          dashboardUrl: `${process.env.FRONTEND_URL}/mon-espace/reservations/${reservation.id}`,
+          dashboardUrl: `${process.env.FRONTEND_URL}/dashboard/event-folders/${eventFolder.id}`,
         },
       });
 
-      console.log(`✉️ Email de confirmation envoyé à ${email}`);
+      this.logger.log(`✉️ Confirmation de réservation envoyée à ${email}`);
     } catch (error) {
-      console.error(
-        `❌ Erreur lors de l'envoi de la confirmation à ${email}:`,
-        error
+      this.logger.error(
+        `❌ Erreur envoi confirmation à ${email}: ${error.message}`,
       );
-      throw new Error(
-        `Impossible d'envoyer l'email de confirmation: ${error.message}`
-      );
+      throw new Error(`Impossible d'envoyer la confirmation: ${error.message}`);
     }
   }
 
   /**
    * Envoie un email de confirmation de paiement
-   * @param user Utilisateur destinataire
-   * @param payment Données du paiement
    */
   async sendPaymentConfirmation(user: any, payment: any): Promise<void> {
     const { email, firstName, lastName } = user;
@@ -130,66 +136,65 @@ export class MailService {
         },
       });
 
-      console.log(`✉️ Email de confirmation de paiement envoyé à ${email}`);
+      this.logger.log(`✉️ Confirmation de paiement envoyée à ${email}`);
     } catch (error) {
-      console.error(
-        `❌ Erreur lors de l'envoi de la confirmation de paiement à ${email}:`,
-        error
+      this.logger.error(
+        `❌ Erreur envoi confirmation paiement à ${email}: ${error.message}`,
       );
       throw new Error(
-        `Impossible d'envoyer l'email de confirmation de paiement: ${error.message}`
+        `Impossible d'envoyer la confirmation de paiement: ${error.message}`,
       );
     }
   }
 
   /**
-   * Envoie un email de rappel d'événement (7 jours avant)
-   * @param user Utilisateur destinataire
-   * @param reservation Données de la réservation
+   * Envoie un email de rappel d'événement (J-21 ou J-14)
    */
-  async sendEventReminder(user: any, reservation: any): Promise<void> {
+  async sendEventReminder(
+    user: { email: string; firstName: string; lastName: string },
+    eventFolder: any,
+    daysBeforeEvent: number,
+  ): Promise<void> {
     const { email, firstName, lastName } = user;
 
     try {
       await this.mailerService.sendMail({
         to: email,
-        subject: `Rappel : Votre événement au Pavillon Les Lys approche !`,
+        subject: `Rappel : Votre événement au Pavillon Les Lys dans ${daysBeforeEvent} jours`,
         template: "./event-reminder",
         context: {
           firstName,
           lastName,
-          reservation: {
-            eventDate: new Date(reservation.eventDate).toLocaleDateString(
-              "fr-FR",
-              {
-                weekday: "long",
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              }
-            ),
-            eventType: reservation.eventType,
-            guestCount: reservation.guestCount,
+          daysBeforeEvent,
+          folder: {
+            folderNumber: eventFolder.folderNumber,
+            eventType: eventFolder.eventType,
+            start: new Date(eventFolder.start).toLocaleDateString("fr-FR", {
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            }),
+            attendees: eventFolder.attendees,
           },
-          dashboardUrl: `${process.env.FRONTEND_URL}/mon-espace/reservations/${reservation.id}`,
+          dashboardUrl: `${process.env.FRONTEND_URL}/dashboard/event-folders/${eventFolder.id}`,
         },
       });
 
-      console.log(`✉️ Email de rappel envoyé à ${email}`);
+      this.logger.log(`✉️ Rappel J-${daysBeforeEvent} envoyé à ${email}`);
     } catch (error) {
-      console.error(`❌ Erreur lors de l'envoi du rappel à ${email}:`, error);
-      throw new Error(
-        `Impossible d'envoyer l'email de rappel: ${error.message}`
-      );
+      this.logger.error(`❌ Erreur envoi rappel à ${email}: ${error.message}`);
+      throw new Error(`Impossible d'envoyer le rappel: ${error.message}`);
     }
   }
 
   /**
-   * Envoie un email de demande d'avis (2 jours après l'événement)
-   * @param user Utilisateur destinataire
-   * @param reservation Données de la réservation
+   * Envoie un email de demande d'avis (après événement COMPLETED)
    */
-  async sendFeedbackRequest(user: any, reservation: any): Promise<void> {
+  async sendFeedbackRequest(
+    user: { email: string; firstName: string; lastName: string },
+    eventFolder: any,
+  ): Promise<void> {
     const { email, firstName, lastName } = user;
 
     try {
@@ -200,36 +205,31 @@ export class MailService {
         context: {
           firstName,
           lastName,
-          reservation: {
-            eventDate: new Date(reservation.eventDate).toLocaleDateString(
-              "fr-FR",
-              {
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              }
-            ),
-            eventType: reservation.eventType,
+          folder: {
+            eventType: eventFolder.eventType,
+            start: new Date(eventFolder.start).toLocaleDateString("fr-FR", {
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            }),
           },
-          feedbackUrl: `${process.env.FRONTEND_URL}/mon-espace/feedback/new?reservationId=${reservation.id}`,
+          feedbackUrl: `${process.env.FRONTEND_URL}/mon-espace/feedback/new?eventFolderId=${eventFolder.id}`,
         },
       });
 
-      console.log(`✉️ Email de demande d'avis envoyé à ${email}`);
+      this.logger.log(`✉️ Demande d'avis envoyée à ${email}`);
     } catch (error) {
-      console.error(
-        `❌ Erreur lors de l'envoi de la demande d'avis à ${email}:`,
-        error
+      this.logger.error(
+        `❌ Erreur envoi demande d'avis à ${email}: ${error.message}`,
       );
       throw new Error(
-        `Impossible d'envoyer l'email de demande d'avis: ${error.message}`
+        `Impossible d'envoyer la demande d'avis: ${error.message}`,
       );
     }
   }
 
   /**
    * Envoie un email de bienvenue (nouveau compte client)
-   * @param user Utilisateur destinataire
    */
   async sendWelcomeEmail(user: any): Promise<void> {
     const { email, firstName, lastName } = user;
@@ -246,22 +246,19 @@ export class MailService {
         },
       });
 
-      console.log(`✉️ Email de bienvenue envoyé à ${email}`);
+      this.logger.log(`✉️ Email de bienvenue envoyé à ${email}`);
     } catch (error) {
-      console.error(
-        `❌ Erreur lors de l'envoi de l'email de bienvenue à ${email}:`,
-        error
+      this.logger.error(
+        `❌ Erreur envoi bienvenue à ${email}: ${error.message}`,
       );
       throw new Error(
-        `Impossible d'envoyer l'email de bienvenue: ${error.message}`
+        `Impossible d'envoyer l'email de bienvenue: ${error.message}`,
       );
     }
   }
 
   /**
    * Envoie un email de réinitialisation de mot de passe
-   * @param user Utilisateur destinataire
-   * @param resetToken Token de réinitialisation
    */
   async sendPasswordResetEmail(user: any, resetToken: string): Promise<void> {
     const { email, firstName, lastName } = user;
@@ -279,82 +276,13 @@ export class MailService {
         },
       });
 
-      console.log(`✉️ Email de réinitialisation envoyé à ${email}`);
+      this.logger.log(`✉️ Email de réinitialisation envoyé à ${email}`);
     } catch (error) {
-      console.error(
-        `❌ Erreur lors de l'envoi de l'email de réinitialisation à ${email}:`,
-        error
+      this.logger.error(
+        `❌ Erreur envoi réinitialisation à ${email}: ${error.message}`,
       );
       throw new Error(
-        `Impossible d'envoyer l'email de réinitialisation: ${error.message}`
-      );
-    }
-  }
-
-  /**
-   * Envoie un email de devis avec le PDF en pièce jointe
-   * @param user Utilisateur destinataire
-   * @param quote Données du devis
-   * @param pdfBuffer Buffer du PDF à joindre
-   */
-  async sendQuoteWithAttachment(
-    user: { email: string; firstName: string; lastName: string },
-    quote: {
-      id: string;
-      reference: string;
-      createdAt: Date;
-      items: any[];
-      totalHT: number;
-      totalTTC: number;
-      notes?: string;
-    },
-    pdfBuffer: Buffer
-  ): Promise<void> {
-    const { email, firstName, lastName } = user;
-
-    try {
-      await this.mailerService.sendMail({
-        to: email,
-        subject: `Votre devis Pavillon Les Lys - Réf. ${quote.reference}`,
-        template: "./quote",
-        context: {
-          firstName,
-          lastName,
-          quote: {
-            reference: quote.reference,
-            date: new Date(quote.createdAt).toLocaleDateString("fr-FR", {
-              day: "numeric",
-              month: "long",
-              year: "numeric",
-            }),
-            items: quote.items,
-            totalHT: quote.totalHT.toFixed(2),
-            totalTTC: quote.totalTTC.toFixed(2),
-            tva: (
-              ((quote.totalTTC - quote.totalHT) / quote.totalHT) *
-              100
-            ).toFixed(0),
-            notes: quote.notes || "",
-          },
-          downloadUrl: `${process.env.FRONTEND_URL}/dashboard/quotes/${quote.id}/download`,
-        },
-        attachments: [
-          {
-            filename: `Devis-${quote.reference}.pdf`,
-            content: pdfBuffer,
-            contentType: "application/pdf",
-          },
-        ],
-      });
-
-      console.log(`✉️ Email de devis avec PDF envoyé à ${email}`);
-    } catch (error) {
-      console.error(
-        `❌ Erreur lors de l'envoi du devis avec PDF à ${email}:`,
-        error
-      );
-      throw new Error(
-        `Impossible d'envoyer l'email de devis avec PDF: ${error.message}`
+        `Impossible d'envoyer l'email de réinitialisation: ${error.message}`,
       );
     }
   }

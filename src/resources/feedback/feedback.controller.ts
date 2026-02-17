@@ -1,17 +1,17 @@
 import {
-    Body,
-    Controller,
-    Delete,
-    ForbiddenException,
-    Get,
-    HttpCode,
-    HttpStatus,
-    Param,
-    ParseUUIDPipe,
-    Patch,
-    Post,
-    Query,
-    UseGuards,
+  Body,
+  Controller,
+  Delete,
+  ForbiddenException,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
 } from "@nestjs/common";
 import { Role } from "@prisma/client";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
@@ -34,7 +34,7 @@ export class FeedbackController {
   @Post()
   async create(
     @Body() createFeedbackDto: CreateFeedbackDto,
-    @CurrentUser() user: any
+    @CurrentUser() user: any,
   ) {
     return this.feedbackService.create(createFeedbackDto, user.id);
   }
@@ -47,17 +47,17 @@ export class FeedbackController {
   @Get()
   async findAll(
     @Query("userId") userId?: string,
-    @Query("reservationId") reservationId?: string,
+    @Query("eventFolderId") eventFolderId?: string,
     @Query("rating") rating?: string,
     @Query("isRead") isRead?: string,
     @Query("skip") skip?: string,
     @Query("take") take?: string,
     @Query("startDate") startDate?: string,
-    @Query("endDate") endDate?: string
+    @Query("endDate") endDate?: string,
   ) {
     const options = {
       userId,
-      reservationId,
+      eventFolderId,
       rating: rating ? parseInt(rating, 10) : undefined,
       isRead: isRead !== undefined ? isRead === "true" : undefined,
       skip: skip ? parseInt(skip, 10) : undefined,
@@ -97,15 +97,12 @@ export class FeedbackController {
   @Get(":id")
   async findOne(
     @Param("id", ParseUUIDPipe) id: string,
-    @CurrentUser() user: any
+    @CurrentUser() user: any,
   ) {
     const feedback = await this.feedbackService.findOne(id);
 
     // Vérifier les permissions
-    if (
-      user.role === Role.CLIENT &&
-      feedback.userId !== user.id
-    ) {
+    if (user.role === Role.CLIENT && feedback.userId !== user.id) {
       throw new ForbiddenException();
     }
 
@@ -121,7 +118,7 @@ export class FeedbackController {
   async update(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() updateFeedbackDto: UpdateFeedbackDto,
-    @CurrentUser() user: any
+    @CurrentUser() user: any,
   ) {
     // Admin peut tout modifier, sinon vérification du propriétaire
     if (user.role === Role.CLIENT) {
@@ -139,7 +136,7 @@ export class FeedbackController {
   @HttpCode(HttpStatus.OK)
   async respondToFeedback(
     @Param("id", ParseUUIDPipe) id: string,
-    @Body("response") response: string
+    @Body("response") response: string,
   ) {
     if (!response?.trim()) {
       throw new ForbiddenException("La réponse ne peut pas être vide");

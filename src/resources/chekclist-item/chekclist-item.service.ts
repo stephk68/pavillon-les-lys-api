@@ -1,14 +1,11 @@
-import {
-    Injectable,
-    NotFoundException
-} from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import { ChecklistItem } from "@prisma/client";
 import { PrismaService } from "../../common/services/prisma.service";
 import { CreateChekclistItemDto } from "./dto/create-chekclist-item.dto";
 import { UpdateChekclistItemDto } from "./dto/update-chekclist-item.dto";
 
 interface FindAllOptions {
-  reservationId?: string;
+  eventFolderId?: string;
   completed?: boolean;
   assignedTo?: string;
   skip?: number;
@@ -31,22 +28,22 @@ export class ChekclistItemService {
    * Créer un nouvel élément de checklist
    */
   async create(
-    createChekclistItemDto: CreateChekclistItemDto
+    createChekclistItemDto: CreateChekclistItemDto,
   ): Promise<ChecklistItem> {
-    // Vérifier que la réservation existe
-    const reservation = await this.prisma.reservation.findUnique({
-      where: { id: createChekclistItemDto.reservationId },
+    // Vérifier que le dossier événement existe
+    const eventFolder = await this.prisma.eventFolder.findUnique({
+      where: { id: createChekclistItemDto.eventFolderId },
     });
 
-    if (!reservation) {
+    if (!eventFolder) {
       throw new NotFoundException(
-        `Réservation avec l'ID ${createChekclistItemDto.reservationId} non trouvée`
+        `Dossier événement avec l'ID ${createChekclistItemDto.eventFolderId} non trouvé`,
       );
     }
 
     // Obtenir le prochain ordre d'affichage
     const maxOrder = await this.prisma.checklistItem.aggregate({
-      where: { reservationId: createChekclistItemDto.reservationId },
+      where: { eventFolderId: createChekclistItemDto.eventFolderId },
       _max: { displayOrder: true },
     });
 
@@ -56,7 +53,7 @@ export class ChekclistItemService {
       data: {
         title: createChekclistItemDto.title,
         description: createChekclistItemDto.description,
-        reservationId: createChekclistItemDto.reservationId,
+        eventFolderId: createChekclistItemDto.eventFolderId,
         assignedTo: createChekclistItemDto.assignedTo,
         dueAt: createChekclistItemDto.dueAt
           ? new Date(createChekclistItemDto.dueAt)
@@ -64,7 +61,7 @@ export class ChekclistItemService {
         displayOrder: nextOrder,
       },
       include: {
-        reservation: {
+        eventFolder: {
           select: {
             id: true,
             eventType: true,
@@ -79,11 +76,17 @@ export class ChekclistItemService {
    * Récupérer tous les éléments avec filtres et pagination
    */
   async findAll(options: FindAllOptions = {}) {
-    const { reservationId, completed, assignedTo, skip = 0, take = 100 } = options;
+    const {
+      eventFolderId,
+      completed,
+      assignedTo,
+      skip = 0,
+      take = 100,
+    } = options;
 
     const where: any = {};
 
-    if (reservationId) where.reservationId = reservationId;
+    if (eventFolderId) where.eventFolderId = eventFolderId;
     if (completed !== undefined) where.completed = completed;
     if (assignedTo) where.assignedTo = assignedTo;
 
@@ -93,7 +96,7 @@ export class ChekclistItemService {
         skip,
         take,
         include: {
-          reservation: {
+          eventFolder: {
             select: {
               id: true,
               eventType: true,
@@ -101,7 +104,7 @@ export class ChekclistItemService {
             },
           },
         },
-        orderBy: [{ reservationId: "asc" }, { displayOrder: "asc" }],
+        orderBy: [{ eventFolderId: "asc" }, { displayOrder: "asc" }],
       }),
       this.prisma.checklistItem.count({ where }),
     ]);
@@ -121,7 +124,7 @@ export class ChekclistItemService {
     const item = await this.prisma.checklistItem.findUnique({
       where: { id },
       include: {
-        reservation: {
+        eventFolder: {
           select: {
             id: true,
             eventType: true,
@@ -134,7 +137,7 @@ export class ChekclistItemService {
 
     if (!item) {
       throw new NotFoundException(
-        `Élément de checklist avec l'ID ${id} non trouvé`
+        `Élément de checklist avec l'ID ${id} non trouvé`,
       );
     }
 
@@ -142,22 +145,22 @@ export class ChekclistItemService {
   }
 
   /**
-   * Récupérer les éléments d'une réservation
+   * Récupérer les éléments d'un dossier événement
    */
-  async findByReservation(reservationId: string): Promise<ChecklistItem[]> {
-    // Vérifier que la réservation existe
-    const reservation = await this.prisma.reservation.findUnique({
-      where: { id: reservationId },
+  async findByEventFolder(eventFolderId: string): Promise<ChecklistItem[]> {
+    // Vérifier que le dossier existe
+    const eventFolder = await this.prisma.eventFolder.findUnique({
+      where: { id: eventFolderId },
     });
 
-    if (!reservation) {
+    if (!eventFolder) {
       throw new NotFoundException(
-        `Réservation avec l'ID ${reservationId} non trouvée`
+        `Dossier événement avec l'ID ${eventFolderId} non trouvé`,
       );
     }
 
     return this.prisma.checklistItem.findMany({
-      where: { reservationId },
+      where: { eventFolderId },
       orderBy: { displayOrder: "asc" },
     });
   }
@@ -167,7 +170,7 @@ export class ChekclistItemService {
    */
   async update(
     id: string,
-    updateChekclistItemDto: UpdateChekclistItemDto
+    updateChekclistItemDto: UpdateChekclistItemDto,
   ): Promise<ChecklistItem> {
     await this.findOne(id); // Vérifier l'existence
 
@@ -196,7 +199,7 @@ export class ChekclistItemService {
       where: { id },
       data,
       include: {
-        reservation: {
+        eventFolder: {
           select: {
             id: true,
             eventType: true,
@@ -248,20 +251,20 @@ export class ChekclistItemService {
   }
 
   /**
-   * Réorganiser les éléments d'une réservation
+   * Réorganiser les éléments d'un dossier événement
    */
   async reorderItems(
-    reservationId: string,
-    itemIds: string[]
+    eventFolderId: string,
+    itemIds: string[],
   ): Promise<ChecklistItem[]> {
-    // Vérifier que la réservation existe
-    const reservation = await this.prisma.reservation.findUnique({
-      where: { id: reservationId },
+    // Vérifier que le dossier existe
+    const eventFolder = await this.prisma.eventFolder.findUnique({
+      where: { id: eventFolderId },
     });
 
-    if (!reservation) {
+    if (!eventFolder) {
       throw new NotFoundException(
-        `Réservation avec l'ID ${reservationId} non trouvée`
+        `Dossier événement avec l'ID ${eventFolderId} non trouvé`,
       );
     }
 
@@ -270,19 +273,19 @@ export class ChekclistItemService {
       this.prisma.checklistItem.update({
         where: { id },
         data: { displayOrder: index + 1 },
-      })
+      }),
     );
 
     await Promise.all(updates);
 
-    return this.findByReservation(reservationId);
+    return this.findByEventFolder(eventFolderId);
   }
 
   /**
    * Obtenir les statistiques de checklist
    */
-  async getStats(reservationId?: string): Promise<ChecklistStats> {
-    const where: any = reservationId ? { reservationId } : {};
+  async getStats(eventFolderId?: string): Promise<ChecklistStats> {
+    const where: any = eventFolderId ? { eventFolderId } : {};
 
     const [totalItems, completedItems, overdueItems, upcomingDeadlines] =
       await Promise.all([

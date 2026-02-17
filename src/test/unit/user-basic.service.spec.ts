@@ -1,11 +1,11 @@
-import { ConflictException } from '@nestjs/common';
-import { Test, TestingModule } from '@nestjs/testing';
-import { Role } from '@prisma/client';
-import { PrismaService } from '../../common/services/prisma.service';
-import { UserService } from '../../resources/user/user.service';
-import { clearAllMocks, mockPrismaService } from '../mocks/prisma.mock';
+import { ConflictException } from "@nestjs/common";
+import { Test, TestingModule } from "@nestjs/testing";
+import { Role } from "@prisma/client";
+import { PrismaService } from "../../common/services/prisma.service";
+import { UserService } from "../../resources/user/user.service";
+import { clearAllMocks, mockPrismaService } from "../mocks/prisma.mock";
 
-describe('UserService - Basic Tests', () => {
+describe("UserService - Basic Tests", () => {
   let service: UserService;
   let prismaService: any;
 
@@ -26,32 +26,37 @@ describe('UserService - Basic Tests', () => {
     prismaService = module.get<PrismaService>(PrismaService);
   });
 
-  it('should be defined', () => {
+  it("should be defined", () => {
     expect(service).toBeDefined();
   });
 
-  it('should have prisma service injected', () => {
+  it("should have prisma service injected", () => {
     expect(prismaService).toBeDefined();
   });
 
-  describe('register', () => {
-    it('should create a new user successfully', async () => {
+  describe("register", () => {
+    it("should create a new user successfully", async () => {
       const createUserDto = {
-        email: 'test@example.com',
-        password: 'password123',
-        firstName: 'John',
-        lastName: 'Doe',
+        email: "test@example.com",
+        password: "password123",
+        firstName: "John",
+        lastName: "Doe",
+        phone: "+2250700000000",
       };
 
       const mockCreatedUser = {
-        id: 'user-1',
-        email: 'test@example.com',
-        firstName: 'John',
-        lastName: 'Doe',
-        phone: null,
+        id: "user-1",
+        email: "test@example.com",
+        firstName: "John",
+        lastName: "Doe",
+        phone: "+2250700000000",
         role: Role.CLIENT,
+        isFirstLogin: true,
+        lastLoginAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
+        createdBy: null,
+        updatedBy: null,
       };
 
       // Mock des appels Prisma
@@ -67,19 +72,20 @@ describe('UserService - Basic Tests', () => {
       expect(result).toEqual(mockCreatedUser);
     });
 
-    it('should throw ConflictException if user already exists', async () => {
+    it("should throw ConflictException if user already exists", async () => {
       const createUserDto = {
-        email: 'existing@example.com',
-        password: 'password123',
-        firstName: 'Jane',
-        lastName: 'Doe',
+        email: "existing@example.com",
+        password: "password123",
+        firstName: "Jane",
+        lastName: "Doe",
+        phone: "+2250700000001",
       };
 
       const existingUser = {
-        id: 'existing-user',
-        email: 'existing@example.com',
-        firstName: 'Jane',
-        lastName: 'Doe',
+        id: "existing-user",
+        email: "existing@example.com",
+        firstName: "Jane",
+        lastName: "Doe",
       };
 
       // Mock utilisateur existant
@@ -92,14 +98,14 @@ describe('UserService - Basic Tests', () => {
     });
   });
 
-  describe('findByEmail', () => {
-    it('should find a user by email', async () => {
-      const email = 'test@example.com';
+  describe("findByEmail", () => {
+    it("should find a user by email", async () => {
+      const email = "test@example.com";
       const mockUser = {
-        id: 'user-1',
-        email: 'test@example.com',
-        firstName: 'John',
-        lastName: 'Doe',
+        id: "user-1",
+        email: "test@example.com",
+        firstName: "John",
+        lastName: "Doe",
         role: Role.CLIENT,
       };
 
@@ -113,8 +119,8 @@ describe('UserService - Basic Tests', () => {
       expect(result).toEqual(mockUser);
     });
 
-    it('should return null if user not found', async () => {
-      const email = 'notfound@example.com';
+    it("should return null if user not found", async () => {
+      const email = "notfound@example.com";
 
       prismaService.user.findUnique.mockResolvedValue(null);
 

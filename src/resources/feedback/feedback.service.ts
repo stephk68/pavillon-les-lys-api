@@ -1,7 +1,7 @@
 import {
-    ForbiddenException,
-    Injectable,
-    NotFoundException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
 } from "@nestjs/common";
 import { Feedback } from "@prisma/client";
 import { PrismaService } from "../../common/services/prisma.service";
@@ -10,7 +10,7 @@ import { UpdateFeedbackDto } from "./dto/update-feedback.dto";
 
 interface FindAllOptions {
   userId?: string;
-  reservationId?: string;
+  eventFolderId?: string;
   rating?: number;
   isRead?: boolean;
   skip?: number;
@@ -36,12 +36,12 @@ export class FeedbackService {
    */
   async create(
     createFeedbackDto: CreateFeedbackDto,
-    userId: string
+    userId: string,
   ): Promise<Feedback> {
     return this.prisma.feedback.create({
       data: {
         userId,
-        reservationId: createFeedbackDto.reservationId,
+        eventFolderId: createFeedbackDto.eventFolderId,
         rating: createFeedbackDto.rating,
         comment: createFeedbackDto.comment,
       },
@@ -54,7 +54,7 @@ export class FeedbackService {
             lastName: true,
           },
         },
-        reservation: {
+        eventFolder: {
           select: {
             id: true,
             eventType: true,
@@ -72,7 +72,7 @@ export class FeedbackService {
   async findAll(options: FindAllOptions = {}) {
     const {
       userId,
-      reservationId,
+      eventFolderId,
       rating,
       isRead,
       skip = 0,
@@ -84,7 +84,7 @@ export class FeedbackService {
     const where: any = {};
 
     if (userId) where.userId = userId;
-    if (reservationId) where.reservationId = reservationId;
+    if (eventFolderId) where.eventFolderId = eventFolderId;
     if (rating !== undefined) where.rating = rating;
     if (isRead !== undefined) where.isRead = isRead;
 
@@ -108,7 +108,7 @@ export class FeedbackService {
               lastName: true,
             },
           },
-          reservation: {
+          eventFolder: {
             select: {
               id: true,
               eventType: true,
@@ -145,7 +145,7 @@ export class FeedbackService {
             lastName: true,
           },
         },
-        reservation: {
+        eventFolder: {
           select: {
             id: true,
             eventType: true,
@@ -169,14 +169,14 @@ export class FeedbackService {
   async update(
     id: string,
     updateFeedbackDto: UpdateFeedbackDto,
-    userId?: string
+    userId?: string,
   ): Promise<Feedback> {
     const feedback = await this.findOne(id);
 
     // Vérifier que l'utilisateur est le propriétaire (si userId fourni)
     if (userId && feedback.userId !== userId) {
       throw new ForbiddenException(
-        "Vous ne pouvez modifier que vos propres feedbacks"
+        "Vous ne pouvez modifier que vos propres feedbacks",
       );
     }
 
@@ -211,23 +211,28 @@ export class FeedbackService {
    * Obtenir les statistiques des feedbacks
    */
   async getStats(): Promise<FeedbackStats> {
-    const [totalFeedbacks, avgResult, distribution, respondedCount, unreadCount] =
-      await Promise.all([
-        this.prisma.feedback.count(),
-        this.prisma.feedback.aggregate({
-          _avg: { rating: true },
-        }),
-        this.prisma.feedback.groupBy({
-          by: ["rating"],
-          _count: true,
-        }),
-        this.prisma.feedback.count({
-          where: { response: { not: null } },
-        }),
-        this.prisma.feedback.count({
-          where: { isRead: false },
-        }),
-      ]);
+    const [
+      totalFeedbacks,
+      avgResult,
+      distribution,
+      respondedCount,
+      unreadCount,
+    ] = await Promise.all([
+      this.prisma.feedback.count(),
+      this.prisma.feedback.aggregate({
+        _avg: { rating: true },
+      }),
+      this.prisma.feedback.groupBy({
+        by: ["rating"],
+        _count: true,
+      }),
+      this.prisma.feedback.count({
+        where: { response: { not: null } },
+      }),
+      this.prisma.feedback.count({
+        where: { isRead: false },
+      }),
+    ]);
 
     const ratingDistribution = distribution.map((d) => ({
       rating: d.rating,
@@ -267,7 +272,7 @@ export class FeedbackService {
             lastName: true,
           },
         },
-        reservation: {
+        eventFolder: {
           select: {
             id: true,
             eventType: true,

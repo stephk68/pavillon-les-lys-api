@@ -21,7 +21,7 @@ export class MailController {
   @Post("test/welcome")
   @HttpCode(HttpStatus.OK)
   async testWelcomeEmail(
-    @Body() body: { firstName: string; lastName: string; email: string }
+    @Body() body: { firstName: string; lastName: string; email: string },
   ) {
     try {
       await this.mailService.sendWelcomeEmail(body);
@@ -53,7 +53,7 @@ export class MailController {
       lastName: string;
       email: string;
       resetToken: string;
-    }
+    },
   ) {
     try {
       await this.mailService.sendPasswordResetEmail(body, body.resetToken);
@@ -70,45 +70,34 @@ export class MailController {
   }
 
   /**
-   * Test 3 : Email de devis
-   * POST /mail/test/quote
-   * Body: Voir exemple ci-dessous
+   * Test 3 : Email de contrat
+   * POST /mail/test/contract
    */
   @Public()
-  @Post("test/quote")
+  @Post("test/contract")
   @HttpCode(HttpStatus.OK)
-  async testQuoteEmail(
+  async testContractEmail(
     @Body()
     body: {
       user: { firstName: string; lastName: string; email: string };
-      quote: {
-        reference: string;
-        createdAt: string;
+      folder: {
+        id: string;
+        folderNumber: string;
+        eventType: string;
+        start: string;
+        end: string;
+        attendees: number;
         totalHT: number;
         totalTTC: number;
-        tvaRate: number;
         notes?: string;
-        items: Array<{
-          description: string;
-          quantity: number;
-          unitPrice: number;
-          total: number;
-        }>;
       };
-    }
+    },
   ) {
     try {
-      // Calcul TVA
-      const tvaAmount = body.quote.totalHT * (body.quote.tvaRate / 100);
-
-      await this.mailService.sendQuote(body.user, {
-        ...body.quote,
-        tvaAmount,
-      });
-
+      await this.mailService.sendContract(body.user, body.folder);
       return {
         success: true,
-        message: `Email de devis envoyé à ${body.user.email}`,
+        message: `Email de contrat envoyé à ${body.user.email}`,
       };
     } catch (error) {
       return {
@@ -120,29 +109,26 @@ export class MailController {
 
   /**
    * Test 4 : Email de confirmation de réservation
-   * POST /mail/test/reservation-confirmation
+   * POST /mail/test/booking-confirmation
    */
   @Public()
-  @Post("test/reservation-confirmation")
+  @Post("test/booking-confirmation")
   @HttpCode(HttpStatus.OK)
-  async testReservationConfirmation(
+  async testBookingConfirmation(
     @Body()
     body: {
       user: { firstName: string; lastName: string; email: string };
-      reservation: {
-        reference: string;
-        eventDate: string;
+      folder: {
+        id: string;
+        folderNumber: string;
         eventType: string;
-        roomName: string;
-        totalAmount: number;
+        start: string;
+        attendees: number;
       };
-    }
+    },
   ) {
     try {
-      await this.mailService.sendReservationConfirmation(
-        body.user,
-        body.reservation
-      );
+      await this.mailService.sendBookingConfirmation(body.user, body.folder);
       return {
         success: true,
         message: `Email de confirmation envoyé à ${body.user.email}`,
@@ -155,46 +141,3 @@ export class MailController {
     }
   }
 }
-
-/**
- * EXEMPLE DE REQUÊTE POSTMAN POUR TEST QUOTE :
- *
- * POST http://localhost:3000/mail/test/quote
- * Content-Type: application/json
- *
- * {
- *   "user": {
- *     "firstName": "Aymeric",
- *     "lastName": "KYS",
- *     "email": "kysaymeric@gmail.com"
- *   },
- *   "quote": {
- *     "reference": "DEVIS-2026-001",
- *     "createdAt": "2026-01-12T10:00:00Z",
- *     "totalHT": 5000,
- *     "totalTTC": 5900,
- *     "tvaRate": 18,
- *     "notes": "Acompte de 30% requis à la signature. Solde à régler 7 jours avant l'événement.",
- *     "items": [
- *       {
- *         "description": "Location Salle Premium (10h)",
- *         "quantity": 1,
- *         "unitPrice": 3000,
- *         "total": 3000
- *       },
- *       {
- *         "description": "Forfait Décoration Luxe",
- *         "quantity": 1,
- *         "unitPrice": 1500,
- *         "total": 1500
- *       },
- *       {
- *         "description": "Service Traiteur (50 personnes)",
- *         "quantity": 50,
- *         "unitPrice": 10,
- *         "total": 500
- *       }
- *     ]
- *   }
- * }
- */

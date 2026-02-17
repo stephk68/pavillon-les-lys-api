@@ -1,16 +1,16 @@
 import {
-    Body,
-    Controller,
-    Delete,
-    Get,
-    HttpCode,
-    HttpStatus,
-    Param,
-    ParseUUIDPipe,
-    Patch,
-    Post,
-    Query,
-    UseGuards,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
 } from "@nestjs/common";
 import { Role } from "@prisma/client";
 import { Roles } from "../../common/decorators/permission.decorator";
@@ -41,14 +41,14 @@ export class ChekclistItemController {
    */
   @Get()
   async findAll(
-    @Query("reservationId") reservationId?: string,
+    @Query("eventFolderId") eventFolderId?: string,
     @Query("completed") completed?: string,
     @Query("assignedTo") assignedTo?: string,
     @Query("skip") skip?: string,
-    @Query("take") take?: string
+    @Query("take") take?: string,
   ) {
     const options = {
-      reservationId,
+      eventFolderId,
       completed: completed !== undefined ? completed === "true" : undefined,
       assignedTo,
       skip: skip ? parseInt(skip, 10) : undefined,
@@ -63,19 +63,19 @@ export class ChekclistItemController {
    * Statistiques de complétion
    */
   @Get("stats")
-  async getStats(@Query("reservationId") reservationId?: string) {
-    return this.chekclistItemService.getStats(reservationId);
+  async getStats(@Query("eventFolderId") eventFolderId?: string) {
+    return this.chekclistItemService.getStats(eventFolderId);
   }
 
   /**
-   * GET /checklist-item/reservation/:reservationId
-   * Éléments d'une réservation spécifique
+   * GET /checklist-item/event-folder/:eventFolderId
+   * Éléments d'un dossier événement spécifique
    */
-  @Get("reservation/:reservationId")
-  async findByReservation(
-    @Param("reservationId", ParseUUIDPipe) reservationId: string
+  @Get("event-folder/:eventFolderId")
+  async findByEventFolder(
+    @Param("eventFolderId", ParseUUIDPipe) eventFolderId: string,
   ) {
-    return this.chekclistItemService.findByReservation(reservationId);
+    return this.chekclistItemService.findByEventFolder(eventFolderId);
   }
 
   /**
@@ -94,7 +94,7 @@ export class ChekclistItemController {
   @Patch(":id")
   async update(
     @Param("id", ParseUUIDPipe) id: string,
-    @Body() updateChekclistItemDto: UpdateChekclistItemDto
+    @Body() updateChekclistItemDto: UpdateChekclistItemDto,
   ) {
     return this.chekclistItemService.update(id, updateChekclistItemDto);
   }
@@ -107,7 +107,7 @@ export class ChekclistItemController {
   @HttpCode(HttpStatus.OK)
   async markAsCompleted(
     @Param("id", ParseUUIDPipe) id: string,
-    @Body("notes") notes?: string
+    @Body("notes") notes?: string,
   ) {
     return this.chekclistItemService.markAsCompleted(id, notes);
   }
@@ -123,19 +123,19 @@ export class ChekclistItemController {
   }
 
   /**
-   * PATCH /checklist-item/reservation/:reservationId/reorder
-   * Réorganiser les éléments d'une réservation
+   * PATCH /checklist-item/event-folder/:eventFolderId/reorder
+   * Réorganiser les éléments d'un dossier événement
    */
-  @Patch("reservation/:reservationId/reorder")
+  @Patch("event-folder/:eventFolderId/reorder")
   @HttpCode(HttpStatus.OK)
   async reorderItems(
-    @Param("reservationId", ParseUUIDPipe) reservationId: string,
-    @Body("itemIds") itemIds: string[]
+    @Param("eventFolderId", ParseUUIDPipe) eventFolderId: string,
+    @Body("itemIds") itemIds: string[],
   ) {
     if (!itemIds || !Array.isArray(itemIds)) {
       throw new Error("itemIds doit être un tableau d'identifiants");
     }
-    return this.chekclistItemService.reorderItems(reservationId, itemIds);
+    return this.chekclistItemService.reorderItems(eventFolderId, itemIds);
   }
 
   /**

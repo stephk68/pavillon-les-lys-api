@@ -56,7 +56,7 @@ export class UserController {
   @Get("client")
   async getAllClients(
     @Query("skip") skip?: string,
-    @Query("take") take?: string
+    @Query("take") take?: string,
   ) {
     const skipNumber = skip ? parseInt(skip, 10) : 0;
     const takeNumber = take ? parseInt(take, 10) : 100;
@@ -74,7 +74,7 @@ export class UserController {
   async findAll(
     @Query("role") role?: Role,
     @Query("skip") skip?: string,
-    @Query("take") take?: string
+    @Query("take") take?: string,
   ) {
     const options = {
       role,
@@ -84,8 +84,8 @@ export class UserController {
     return this.userService.findAll(options);
   }
 
-  // Route publique pour la recherche (ou restreindre selon vos besoins)
-  @Public()
+  // Recherche d'utilisateurs (admin/staff seulement)
+  @Roles(Role.ADMIN, Role.EVENT_MANAGER)
   @Get("search")
   async searchUsers(@Query("q") query: string) {
     return this.userService.searchUsers(query);
@@ -110,7 +110,7 @@ export class UserController {
   @Get(":id")
   async findOne(
     @Param("id", ParseUUIDPipe) id: string,
-    @CurrentUser() currentUser: any
+    @CurrentUser() currentUser: any,
   ) {
     // Vérifier si l'utilisateur demande son propre profil ou s'il est admin/staff
     if (
@@ -121,7 +121,7 @@ export class UserController {
       return this.userService.findOne(id);
     }
     throw new ForbiddenException(
-      "Vous ne pouvez accéder qu’à votre propre profil"
+      "Vous ne pouvez accéder qu’à votre propre profil",
     );
   }
 
@@ -137,7 +137,7 @@ export class UserController {
   async update(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() updateUserDto: UpdateUserDto,
-    @CurrentUser() currentUser: any
+    @CurrentUser() currentUser: any,
   ) {
     // Vérifier les permissions
     if (currentUser.id === id || currentUser.role === Role.ADMIN) {
@@ -149,7 +149,7 @@ export class UserController {
       return this.userService.update(id, updateUserDto);
     }
     throw new ForbiddenException(
-      "Vous ne pouvez modifier que votre propre profil ou celui d’un utilisateur si vous êtes admin"
+      "Vous ne pouvez modifier que votre propre profil ou celui d’un utilisateur si vous êtes admin",
     );
   }
 
@@ -159,19 +159,19 @@ export class UserController {
   async updatePassword(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() updatePasswordDto: UpdatePasswordDto,
-    @CurrentUser() currentUser: any
+    @CurrentUser() currentUser: any,
   ) {
     // Seul l'utilisateur lui-même peut changer son mot de passe
     if (currentUser.id !== id) {
       throw new ForbiddenException(
-        "Vous ne pouvez changer que votre propre mot de passe"
+        "Vous ne pouvez changer que votre propre mot de passe",
       );
     }
 
     await this.userService.updatePassword(
       id,
       updatePasswordDto.currentPassword,
-      updatePasswordDto.newPassword
+      updatePasswordDto.newPassword,
     );
   }
 
