@@ -68,7 +68,7 @@ async function bootstrap() {
     }),
   );
 
-  const port = process.env.PORT ?? 3000;
+  const port = process.env.PORT ?? 4000;
   await app.listen(port);
   logger.log(`🚀 API démarrée sur le port ${port}`);
   logger.log(`📋 Origines autorisées: ${allowedOrigins.join(", ")}`);
