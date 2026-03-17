@@ -6,7 +6,7 @@ import {
   IsUUID,
 } from "class-validator";
 
-export class CreateChekclistItemDto {
+export class CreateChecklistItemDto {
   @IsString()
   @IsNotEmpty()
   title: string;

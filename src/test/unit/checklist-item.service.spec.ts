@@ -1,10 +1,10 @@
 import { NotFoundException } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { PrismaService } from "../../common/services/prisma.service";
-import { ChekclistItemService } from "../../resources/chekclist-item/chekclist-item.service";
+import { ChecklistItemService } from "../../resources/checklist-item/checklist-item.service";
 
-describe("ChekclistItemService", () => {
-  let service: ChekclistItemService;
+describe("ChecklistItemService", () => {
+  let service: ChecklistItemService;
   let prismaService: any;
 
   const mockChecklistItem = {
@@ -51,7 +51,7 @@ describe("ChekclistItemService", () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        ChekclistItemService,
+        ChecklistItemService,
         {
           provide: PrismaService,
           useValue: mockPrismaService,
@@ -59,7 +59,7 @@ describe("ChekclistItemService", () => {
       ],
     }).compile();
 
-    service = module.get<ChekclistItemService>(ChekclistItemService);
+    service = module.get<ChecklistItemService>(ChecklistItemService);
     prismaService = module.get(PrismaService);
   });
 

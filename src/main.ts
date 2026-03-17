@@ -12,6 +12,7 @@ async function bootstrap() {
   const allowedOrigins = [
     "http://localhost:3001", // Back Office (Dev)
     "http://localhost:3002", // Front Office (Dev)
+    "http://localhost:3000", // API (Dev)
     process.env.BACKOFFICE_URL, // Back Office (Prod)
     process.env.FRONTOFFICE_URL, // Front Office (Prod)
   ].filter(Boolean);

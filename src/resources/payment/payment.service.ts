@@ -7,6 +7,8 @@ import {
 import { PaymentStatus, PaymentType, Prisma } from "@prisma/client";
 import { PdfService } from "../../common/services/pdf.service";
 import { PrismaService } from "../../common/services/prisma.service";
+import { MailService } from "../../mail/mail.service";
+import { AuditLogService } from "../audit-log/audit-log.service";
 import { CreatePaymentDto, UpdatePaymentDto } from "./dto/payment.dto";
 
 @Injectable()
@@ -16,6 +18,8 @@ export class PaymentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pdfService: PdfService,
+    private readonly auditLogService: AuditLogService,
+    private readonly mailService: MailService,
   ) {}
 
   // ==================== CRUD ====================
@@ -77,7 +81,7 @@ export class PaymentService {
               folderNumber: true,
               status: true,
               eventType: true,
-              start: true,
+              schedules: { select: { date: true } },
             },
           },
           user: {
@@ -104,8 +108,7 @@ export class PaymentService {
             folderNumber: true,
             status: true,
             eventType: true,
-            start: true,
-            end: true,
+            schedules: { select: { date: true } },
             totalTTC: true,
             user: {
               select: {
@@ -172,6 +175,13 @@ export class PaymentService {
     await this.prisma.payment.delete({ where: { id } });
   }
 
+  async updateProofDocument(id: string, filename: string) {
+    return this.prisma.payment.update({
+      where: { id },
+      data: { proofDocument: filename },
+    });
+  }
+
   // ==================== STATUS ====================
 
   async markAsPaid(id: string) {
@@ -181,7 +191,7 @@ export class PaymentService {
       throw new BadRequestException("Ce paiement est déjà validé");
     }
 
-    return this.prisma.payment.update({
+    const updated = await this.prisma.payment.update({
       where: { id },
       data: {
         status: PaymentStatus.PAID,
@@ -189,10 +199,48 @@ export class PaymentService {
       },
       include: {
         eventFolder: {
-          select: { id: true, folderNumber: true, status: true },
+          select: {
+            id: true,
+            folderNumber: true,
+            status: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
         },
       },
     });
+
+    // Audit log (fire-and-forget)
+    this.auditLogService
+      .create({
+        action: "PAYMENT_VALIDATED",
+        description: `Paiement ${payment.type} de ${Number(payment.amount).toLocaleString("fr-FR")} XOF marqué comme PAYÉ pour le dossier ${updated.eventFolder.folderNumber}`,
+        entityType: "Payment",
+        entityId: id,
+        folderNumber: updated.eventFolder.folderNumber,
+        userId: payment.userId || updated.eventFolder.user?.id,
+      })
+      .catch(() => {});
+
+    // Envoi email de confirmation de paiement (fire-and-forget)
+    if (payment.user) {
+      this.mailService
+        .sendPaymentConfirmation(payment.user, {
+          amount: payment.amount,
+          type: payment.type,
+          paidAt: new Date(),
+          paymentMethod: "Virement",
+        })
+        .catch(() => {});
+    }
+
+    return updated;
   }
 
   async refund(id: string) {
@@ -204,7 +252,7 @@ export class PaymentService {
       );
     }
 
-    return this.prisma.payment.update({
+    const updated = await this.prisma.payment.update({
       where: { id },
       data: {
         status: PaymentStatus.REFUNDED,
@@ -217,6 +265,20 @@ export class PaymentService {
         },
       },
     });
+
+    // Audit log (fire-and-forget)
+    this.auditLogService
+      .create({
+        action: "PAYMENT_REFUNDED",
+        description: `Remboursement ${payment.type} de ${Number(payment.amount).toLocaleString("fr-FR")} XOF pour le dossier ${updated.eventFolder.folderNumber}`,
+        entityType: "Payment",
+        entityId: id,
+        folderNumber: updated.eventFolder.folderNumber,
+        userId: payment.userId || "",
+      })
+      .catch(() => {});
+
+    return updated;
   }
 
   // ==================== QUERIES ====================
@@ -281,6 +343,17 @@ export class PaymentService {
       month,
       revenue: Number(result._sum.amount || 0),
       count: result._count._all,
+    };
+  }
+
+  async getYearlyRevenue(year: number) {
+    const months = await Promise.all(
+      Array.from({ length: 12 }, (_, i) => this.getMonthlyRevenue(year, i + 1)),
+    );
+    return {
+      year,
+      months,
+      total: months.reduce((sum, m) => sum + m.revenue, 0),
     };
   }
 

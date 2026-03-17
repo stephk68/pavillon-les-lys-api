@@ -1,14 +1,16 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from "@nestjs/common";
+import { Role } from "@prisma/client";
+import { Roles } from "../common/decorators/permission.decorator";
 import { Public } from "../common/decorators/public.decorator";
 import { MailService } from "./mail.service";
 
 /**
  * Controller de test pour l'envoi d'emails
  *
- * ⚠️ NOTE : Ces endpoints sont publics (sans authentification) pour faciliter les tests.
- * En production, retirez le décorateur @Public() ou supprimez ce controller.
+ * ⚠️ Protégé par le rôle ADMIN uniquement.
  */
 @Controller("mail")
+@Roles(Role.ADMIN)
 export class MailController {
   constructor(private readonly mailService: MailService) {}
 
@@ -17,7 +19,6 @@ export class MailController {
    * POST /mail/test/welcome
    * Body: { "firstName": "John", "lastName": "Doe", "email": "test@example.com" }
    */
-  @Public()
   @Post("test/welcome")
   @HttpCode(HttpStatus.OK)
   async testWelcomeEmail(
@@ -43,7 +44,6 @@ export class MailController {
    * POST /mail/test/reset-password
    * Body: { "firstName": "John", "lastName": "Doe", "email": "test@example.com", "resetToken": "abc123" }
    */
-  @Public()
   @Post("test/reset-password")
   @HttpCode(HttpStatus.OK)
   async testResetPasswordEmail(
@@ -73,7 +73,6 @@ export class MailController {
    * Test 3 : Email de contrat
    * POST /mail/test/contract
    */
-  @Public()
   @Post("test/contract")
   @HttpCode(HttpStatus.OK)
   async testContractEmail(
@@ -111,7 +110,6 @@ export class MailController {
    * Test 4 : Email de confirmation de réservation
    * POST /mail/test/booking-confirmation
    */
-  @Public()
   @Post("test/booking-confirmation")
   @HttpCode(HttpStatus.OK)
   async testBookingConfirmation(
@@ -132,6 +130,38 @@ export class MailController {
       return {
         success: true,
         message: `Email de confirmation envoyé à ${body.user.email}`,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Formulaire de contact public
+   * POST /mail/contact
+   */
+  @Public()
+  @Post("contact")
+  @HttpCode(HttpStatus.OK)
+  async sendContactMessage(
+    @Body()
+    body: {
+      firstName: string;
+      lastName: string;
+      email: string;
+      phone?: string;
+      eventType?: string;
+      message: string;
+    },
+  ) {
+    try {
+      await this.mailService.sendContactMessage(body);
+      return {
+        success: true,
+        message: "Votre message a bien été envoyé",
       };
     } catch (error) {
       return {

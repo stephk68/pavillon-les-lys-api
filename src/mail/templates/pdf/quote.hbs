@@ -1,0 +1,386 @@
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@300;400;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: Georgia, "Times New Roman", serif;
+        background-color: #fdfaf5;
+        color: #000000;
+        line-height: 1.6;
+        font-size: 13px;
+      }
+      .page {
+        max-width: 780px;
+        margin: 0 auto;
+        padding: 40px;
+        border-top: 2px solid #b89140;
+        border-top: 2px solid #b89140;
+      }
+
+      /* Header */
+      .doc-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        padding-bottom: 24px;
+        border-bottom: 2px solid #b89140;
+        margin-bottom: 32px;
+      }
+      .logo {
+        font-family: "Playfair Display", Georgia, serif;
+        color: #b89140;
+        font-size: 22px;
+        letter-spacing: 0.25em;
+        font-weight: 300;
+      }
+      .logo-sub {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        color: #a97c50;
+        margin-top: 6px;
+      }
+      .doc-meta {
+        text-align: right;
+        font-size: 12px;
+        color: #555;
+        line-height: 1.8;
+      }
+      .doc-meta strong {
+        color: #000;
+        font-size: 14px;
+      }
+      .doc-meta .doc-title {
+        font-family: "Playfair Display", Georgia, serif;
+        color: #b89140;
+        font-size: 18px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 6px;
+      }
+
+      /* Info grid */
+      .info-grid {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 28px;
+      }
+      .info-grid td {
+        vertical-align: top;
+        padding: 0 16px 0 0;
+        width: 50%;
+        font-size: 13px;
+      }
+      .info-grid td:last-child {
+        padding-right: 0;
+      }
+      .info-box {
+        background: #f5f0e8;
+        border: 1px solid rgba(201, 161, 74, 0.15);
+        border-radius: 0;
+        padding: 16px 18px;
+      }
+      .info-box .box-title {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        color: #a97c50;
+        font-weight: 600;
+        margin-bottom: 10px;
+      }
+      .info-box p {
+        margin: 0 0 5px;
+        color: #000;
+        font-size: 13px;
+      }
+      .info-box .label {
+        color: #a97c50;
+        font-weight: 500;
+      }
+
+      /* Section title */
+      .section-title {
+        font-family: "Playfair Display", Georgia, serif;
+        font-size: 13px;
+        font-weight: 600;
+        color: #000000;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        border-left: 4px solid #b89140;
+        padding-left: 12px;
+        margin: 28px 0 14px;
+      }
+      .section-title:first-child {
+        margin-top: 0;
+      }
+
+      /* Items table */
+      table.items {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 24px;
+      }
+      table.items th {
+        background-color: #b89140;
+        color: #fdfaf5;
+        text-align: left;
+        padding: 11px 14px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        font-weight: 500;
+      }
+      table.items th:last-child {
+        text-align: right;
+      }
+      table.items td {
+        padding: 11px 14px;
+        border-bottom: 1px solid rgba(201, 161, 74, 0.12);
+        font-size: 13px;
+        color: #000;
+        vertical-align: top;
+      }
+      table.items td:nth-child(2),
+      table.items td:nth-child(3) {
+        text-align: center;
+        white-space: nowrap;
+      }
+      table.items td:last-child {
+        text-align: right;
+        white-space: nowrap;
+        font-weight: 500;
+      }
+      table.items tr:last-child td {
+        border-bottom: none;
+      }
+
+      /* Totals */
+      .totals-wrapper {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 28px;
+      }
+      .totals-box {
+        width: 300px;
+      }
+      .total-line {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 0;
+        font-size: 13px;
+        border-bottom: 1px solid rgba(201, 161, 74, 0.12);
+        color: #555;
+      }
+      .total-line .val {
+        font-weight: 500;
+        color: #000;
+      }
+      .total-line.vat {
+        font-size: 12px;
+        color: #888;
+      }
+      .total-line.grand {
+        border-top: 2px solid #b89140;
+        border-bottom: none;
+        font-size: 16px;
+        font-weight: 700;
+        color: #b89140;
+        margin-top: 4px;
+        padding-top: 12px;
+      }
+      .total-line.grand .val {
+        color: #b89140;
+      }
+
+      /* Notes */
+      .notes-box {
+        background: #f5f0e8;
+        border-left: 4px solid #b89140;
+        padding: 16px 20px;
+        margin-bottom: 28px;
+        font-size: 13px;
+        color: #333;
+        line-height: 1.8;
+      }
+
+      /* Footer with validity + signature */
+      .doc-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        margin-top: 20px;
+      }
+      .validity {
+        font-size: 12px;
+        color: #555;
+        line-height: 1.8;
+      }
+      .validity strong {
+        color: #b89140;
+      }
+      .signature-block {
+        text-align: center;
+        width: 200px;
+      }
+      .sig-spacer {
+        height: 60px;
+      }
+      .signature-line {
+        border-top: 1px solid #888;
+        padding-top: 8px;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: #888;
+      }
+
+      /* Document footer */
+      .doc-footer {
+        margin-top: 36px;
+        padding-top: 16px;
+        border-top: 1px solid rgba(201, 161, 74, 0.2);
+        text-align: center;
+        font-size: 11px;
+        color: #a97c50;
+        line-height: 1.7;
+      }
+      .doc-footer strong {
+        color: #b89140;
+        font-family: "Playfair Display", Georgia, serif;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+
+      <!-- En-tête -->
+      <div class="doc-header">
+        <div>
+          <div class="logo">PAVILLON LES LYS</div>
+          <div class="logo-sub">Salle de réception — Abidjan</div>
+        </div>
+        <div class="doc-meta">
+          <div class="doc-title">Devis</div>
+          Référence
+          <strong>{{number}}</strong><br />
+          Date d'émission :
+          {{date}}<br />
+          Validité :
+          {{validUntil}}
+        </div>
+      </div>
+
+      <!-- Informations -->
+      <table class="info-grid">
+        <tr>
+          <td>
+            <div class="info-box">
+              <div class="box-title">Informations Client</div>
+              <p><span class="label">Nom :</span> {{client.name}}</p>
+              {{#if client.email}}<p><span class="label">Email :</span>
+                  {{client.email}}</p>{{/if}}
+              {{#if client.phone}}<p><span class="label">Tél :</span>
+                  {{client.phone}}</p>{{/if}}
+              {{#if client.address}}<p><span class="label">Adresse :</span>
+                  {{client.address}}</p>{{/if}}
+            </div>
+          </td>
+          <td>
+            <div class="info-box">
+              <div class="box-title">Détails du Devis</div>
+              <p><span class="label">Référence :</span> {{number}}</p>
+              <p><span class="label">Émis le :</span> {{date}}</p>
+              <p><span class="label">Valable jusqu'au :</span>
+                {{validUntil}}</p>
+            </div>
+          </td>
+        </tr>
+      </table>
+
+      <!-- Prestations -->
+      <div class="section-title">Détail des prestations</div>
+      <table class="items">
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th style="text-align:center;">Quantité</th>
+            <th style="text-align:center;">Prix unitaire</th>
+            <th style="text-align:right;">Total HT</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{#each items}}
+            <tr>
+              <td>{{description}}</td>
+              <td style="text-align:center;">{{quantity}}</td>
+              <td style="text-align:center;">{{formatXOF unitPrice}}</td>
+              <td style="text-align:right; font-weight:500;">{{formatXOF
+                  totalPrice
+                }}</td>
+            </tr>
+          {{/each}}
+        </tbody>
+      </table>
+
+      <!-- Totaux -->
+      <div class="totals-wrapper">
+        <div class="totals-box">
+          <div class="total-line">
+            <span>Total HT</span>
+            <span class="val">{{formatXOF totalHT}}</span>
+          </div>
+          <div class="total-line vat">
+            <span>TVA ({{vatRate}} %)</span>
+            <span class="val">{{formatXOF vatAmount}}</span>
+          </div>
+          <div class="total-line grand">
+            <span>Total TTC</span>
+            <span class="val">{{formatXOF totalTTC}}</span>
+          </div>
+        </div>
+      </div>
+
+      {{#if notes}}
+        <!-- Notes -->
+        <div class="section-title">Notes & Conditions</div>
+        <div class="notes-box">{{notes}}</div>
+      {{/if}}
+
+      <!-- Validité + Signature -->
+      <div class="doc-actions">
+        <div class="validity">
+          Ce devis est valable jusqu'au
+          <strong>{{validUntil}}</strong>.<br />
+          Un acompte de 50 % sera demandé à la signature du contrat.
+        </div>
+        <div class="signature-block">
+          <div class="sig-spacer"></div>
+          <div class="signature-line">Signature client</div>
+        </div>
+      </div>
+
+      <!-- Pied de page -->
+      <div class="doc-footer">
+        <strong>Pavillon Les Lys</strong>
+        — Salle de réception 450 m² — Riviera Palmeraie, Abidjan, Côte d'Ivoire<br
+        />
+        Devis N°
+        {{number}}
+        — Généré le
+        {{date}}
+      </div>
+
+    </div>
+  </body>
+</html>

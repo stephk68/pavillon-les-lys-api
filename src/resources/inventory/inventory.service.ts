@@ -1,7 +1,7 @@
 import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
+    BadRequestException,
+    Injectable,
+    NotFoundException,
 } from "@nestjs/common";
 import { InventoryItemStatus, InventoryItemType, Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/services/prisma.service";
@@ -52,9 +52,13 @@ export class InventoryService {
           include: {
             eventFolder: {
               select: {
-                id: true,
-                start: true,
-                end: true,
+                schedules: {
+                  select: {
+                    date: true,
+                    startTime: true,
+                    endTime: true,
+                  }
+                },
                 status: true,
               },
             },
@@ -102,8 +106,13 @@ export class InventoryService {
             eventFolder: {
               select: {
                 id: true,
-                start: true,
-                end: true,
+                schedules: {
+                  select: {
+                    date: true,
+                    startTime: true,
+                    endTime: true,
+                  }
+                },
                 status: true,
                 user: {
                   select: {
@@ -229,16 +238,11 @@ export class InventoryService {
           status: {
             in: ["QUOTED", "BOOKED", "READY"],
           },
-          OR: [
-            {
-              start: {
-                lte: end,
-              },
-              end: {
-                gte: start,
-              },
-            },
-          ],
+          schedules: {
+            some: {
+              date: { gte: start, lte: end }
+            }
+          }
         },
       },
       include: {
@@ -260,8 +264,6 @@ export class InventoryService {
       availableQuantity,
       overlappingFolders: overlappingEquipments.map((re) => ({
         eventFolderId: re.eventFolder.id,
-        start: re.eventFolder.start,
-        end: re.eventFolder.end,
         quantity: re.quantityReserved,
       })),
     };

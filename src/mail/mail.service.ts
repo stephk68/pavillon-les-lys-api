@@ -38,18 +38,30 @@ export class MailService {
           folder: {
             folderNumber: eventFolder.folderNumber,
             eventType: eventFolder.eventType,
-            start: new Date(eventFolder.start).toLocaleDateString("fr-FR", {
-              weekday: "long",
-              day: "numeric",
-              month: "long",
-              year: "numeric",
-            }),
-            end: new Date(eventFolder.end).toLocaleDateString("fr-FR", {
-              weekday: "long",
-              day: "numeric",
-              month: "long",
-              year: "numeric",
-            }),
+            start: eventFolder.schedules?.[0]
+              ? new Date(eventFolder.schedules[0].date).toLocaleDateString(
+                  "fr-FR",
+                  {
+                    weekday: "long",
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                  },
+                )
+              : "Date non définie",
+            end:
+              eventFolder.schedules?.length > 1
+                ? new Date(
+                    eventFolder.schedules[
+                      eventFolder.schedules.length - 1
+                    ].date,
+                  ).toLocaleDateString("fr-FR", {
+                    weekday: "long",
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                  })
+                : undefined,
             attendees: eventFolder.attendees,
             totalHT: eventFolder.totalHT?.toFixed(2) || "0.00",
             totalTTC: eventFolder.totalTTC?.toFixed(2) || "0.00",
@@ -87,12 +99,17 @@ export class MailService {
           folder: {
             folderNumber: eventFolder.folderNumber,
             eventType: eventFolder.eventType,
-            start: new Date(eventFolder.start).toLocaleDateString("fr-FR", {
-              weekday: "long",
-              day: "numeric",
-              month: "long",
-              year: "numeric",
-            }),
+            start: eventFolder.schedules?.[0]
+              ? new Date(eventFolder.schedules[0].date).toLocaleDateString(
+                  "fr-FR",
+                  {
+                    weekday: "long",
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                  },
+                )
+              : "Date non définie",
             attendees: eventFolder.attendees,
           },
           dashboardUrl: `${process.env.FRONTEND_URL}/dashboard/event-folders/${eventFolder.id}`,
@@ -169,12 +186,17 @@ export class MailService {
           folder: {
             folderNumber: eventFolder.folderNumber,
             eventType: eventFolder.eventType,
-            start: new Date(eventFolder.start).toLocaleDateString("fr-FR", {
-              weekday: "long",
-              day: "numeric",
-              month: "long",
-              year: "numeric",
-            }),
+            start: eventFolder.schedules?.[0]
+              ? new Date(eventFolder.schedules[0].date).toLocaleDateString(
+                  "fr-FR",
+                  {
+                    weekday: "long",
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                  },
+                )
+              : "Date non définie",
             attendees: eventFolder.attendees,
           },
           dashboardUrl: `${process.env.FRONTEND_URL}/dashboard/event-folders/${eventFolder.id}`,
@@ -207,11 +229,16 @@ export class MailService {
           lastName,
           folder: {
             eventType: eventFolder.eventType,
-            start: new Date(eventFolder.start).toLocaleDateString("fr-FR", {
-              day: "numeric",
-              month: "long",
-              year: "numeric",
-            }),
+            start: eventFolder.schedules?.[0]
+              ? new Date(eventFolder.schedules[0].date).toLocaleDateString(
+                  "fr-FR",
+                  {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                  },
+                )
+              : "Date non définie",
           },
           feedbackUrl: `${process.env.FRONTEND_URL}/mon-espace/feedback/new?eventFolderId=${eventFolder.id}`,
         },
@@ -283,6 +310,164 @@ export class MailService {
       );
       throw new Error(
         `Impossible d'envoyer l'email de réinitialisation: ${error.message}`,
+      );
+    }
+  }
+
+  /**
+   * Envoie un email de devis détaillé au client
+   */
+  async sendQuoteDocument(
+    client: { name: string; phone: string; email: string },
+    event: {
+      folderNumber: string;
+      eventType: string;
+      eventDate: string;
+      guestCount: number;
+    },
+    items: {
+      description: string;
+      quantity: number;
+      unitPrice: string;
+      totalPrice: string;
+    }[],
+    totals: {
+      totalTTC: string;
+      depositAmount: string;
+      balanceAmount: string;
+      cautionAmount: string;
+    },
+  ): Promise<void> {
+    try {
+      await this.mailerService.sendMail({
+        to: client.email,
+        subject: `Votre devis Pavillon Les Lys - ${event.folderNumber}`,
+        template: "./quote-document",
+        context: {
+          clientName: client.name,
+          clientPhone: client.phone,
+          clientEmail: client.email,
+          folderNumber: event.folderNumber,
+          eventType: event.eventType,
+          eventDate: event.eventDate,
+          guestCount: event.guestCount,
+          items,
+          totalTTC: totals.totalTTC,
+          depositAmount: totals.depositAmount,
+          balanceAmount: totals.balanceAmount,
+          cautionAmount: totals.cautionAmount,
+        },
+      });
+
+      this.logger.log(`✉️ Devis envoyé à ${client.email}`);
+    } catch (error) {
+      this.logger.error(
+        `❌ Erreur envoi devis à ${client.email}: ${error.message}`,
+      );
+      throw new Error(`Impossible d'envoyer le devis: ${error.message}`);
+    }
+  }
+
+  /**
+   * Envoie un email de confirmation de changement de mot de passe
+   */
+  async sendPasswordChangedConfirmation(user: {
+    email: string;
+    firstName: string;
+    lastName: string;
+  }): Promise<void> {
+    const { email, firstName, lastName } = user;
+
+    try {
+      await this.mailerService.sendMail({
+        to: email,
+        subject: `Votre mot de passe a été modifié - Pavillon Les Lys`,
+        template: "./password-changed-confirmation",
+        context: {
+          firstName,
+          lastName,
+          changedAt: new Date().toLocaleDateString("fr-FR", {
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          loginUrl: `${process.env.FRONTEND_URL}/auth/login`,
+        },
+      });
+
+      this.logger.log(`✉️ Confirmation changement MDP envoyée à ${email}`);
+    } catch (error) {
+      this.logger.error(
+        `❌ Erreur envoi confirmation MDP à ${email}: ${error.message}`,
+      );
+    }
+  }
+
+  /**
+   * Envoie un message de contact à l'équipe Pavillon Les Lys
+   */
+  async sendContactMessage(data: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone?: string;
+    eventType?: string;
+    message: string;
+  }): Promise<void> {
+    try {
+      await this.mailerService.sendMail({
+        to: process.env.MAIL_FROM || "contact@pavillonleslys.com",
+        subject: `Nouveau message de contact - ${data.firstName} ${data.lastName}`,
+        template: "./contact-message",
+        context: {
+          firstName: data.firstName,
+          lastName: data.lastName,
+          email: data.email,
+          phone: data.phone,
+          eventType: data.eventType,
+          message: data.message,
+        },
+      });
+
+      this.logger.log(`✉️ Message de contact reçu de ${data.email}`);
+    } catch (error) {
+      this.logger.error(
+        `❌ Erreur envoi message contact de ${data.email}: ${error.message}`,
+      );
+      throw new Error(
+        `Impossible d'envoyer le message de contact: ${error.message}`,
+      );
+    }
+  }
+
+  /**
+   * Envoie un code OTP pour la première connexion
+   */
+  async sendOtpCode(
+    user: { email: string; firstName: string; lastName: string },
+    otpCode: string,
+  ): Promise<void> {
+    const { email, firstName } = user;
+
+    try {
+      await this.mailerService.sendMail({
+        to: email,
+        subject: `Votre code de connexion — Pavillon Les Lys`,
+        template: "./otp-code",
+        context: {
+          firstName,
+          otpCode,
+          expiresIn: "10 minutes",
+          year: new Date().getFullYear(),
+        },
+      });
+
+      this.logger.log(`✉️ Code OTP envoyé à ${email}`);
+    } catch (error) {
+      this.logger.error(
+        `❌ Erreur envoi OTP à ${email}: ${(error as Error).message}`,
       );
     }
   }

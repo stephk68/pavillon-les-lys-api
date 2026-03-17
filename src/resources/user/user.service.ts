@@ -16,7 +16,7 @@ export class UserService {
 
   async register(
     createUserDto: CreateUserDto,
-  ): Promise<Omit<User, "password">> {
+  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">> {
     // Vérifier si l'utilisateur existe déjà
     const existingUser = await this.prisma.user.findUnique({
       where: { email: createUserDto.email },
@@ -49,6 +49,8 @@ export class UserService {
         role: true,
         isFirstLogin: true,
         lastLoginAt: true,
+        resetToken: true,
+        resetTokenExpiry: true,
         createdAt: true,
         updatedAt: true,
         createdBy: true,
@@ -61,7 +63,7 @@ export class UserService {
 
   async createStaff(
     createUserDto: CreateUserDto,
-  ): Promise<Omit<User, "password">> {
+  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">> {
     // Vérifier si l'utilisateur existe déjà
     const existingUser = await this.prisma.user.findUnique({
       where: { email: createUserDto.email },
@@ -103,6 +105,8 @@ export class UserService {
         role: true,
         isFirstLogin: true,
         lastLoginAt: true,
+        resetToken: true,
+        resetTokenExpiry: true,
         createdAt: true,
         updatedAt: true,
         createdBy: true,
@@ -132,6 +136,8 @@ export class UserService {
           role: true,
           isFirstLogin: true,
           lastLoginAt: true,
+          resetToken: true,
+          resetTokenExpiry: true,
           createdAt: true,
           updatedAt: true,
           createdBy: true,
@@ -150,7 +156,9 @@ export class UserService {
     };
   }
 
-  async findOne(id: string): Promise<Omit<User, "password">> {
+  async findOne(
+    id: string,
+  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">> {
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
@@ -162,6 +170,8 @@ export class UserService {
         role: true,
         isFirstLogin: true,
         lastLoginAt: true,
+        resetToken: true,
+        resetTokenExpiry: true,
         createdAt: true,
         updatedAt: true,
         createdBy: true,
@@ -171,8 +181,13 @@ export class UserService {
             id: true,
             folderNumber: true,
             eventType: true,
-            start: true,
-            end: true,
+            schedules: {
+              select: {
+                date: true,
+                startTime: true,
+                endTime: true,
+              },
+            },
             status: true,
             attendees: true,
           },
@@ -197,7 +212,7 @@ export class UserService {
   async update(
     id: string,
     updateUserDto: UpdateUserDto,
-  ): Promise<Omit<User, "password">> {
+  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">> {
     // Vérifier si l'utilisateur existe
     await this.findOne(id);
 
@@ -224,6 +239,8 @@ export class UserService {
         role: true,
         isFirstLogin: true,
         lastLoginAt: true,
+        resetToken: true,
+        resetTokenExpiry: true,
         createdAt: true,
         updatedAt: true,
         createdBy: true,
@@ -315,7 +332,9 @@ export class UserService {
     };
   }
 
-  async searchUsers(query: string): Promise<Omit<User, "password">[]> {
+  async searchUsers(
+    query: string,
+  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">[]> {
     return this.prisma.user.findMany({
       where: {
         OR: [
@@ -333,6 +352,8 @@ export class UserService {
         role: true,
         isFirstLogin: true,
         lastLoginAt: true,
+        resetToken: true,
+        resetTokenExpiry: true,
         createdAt: true,
         updatedAt: true,
         createdBy: true,

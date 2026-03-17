@@ -27,6 +27,19 @@ export class EventFolderItemDto {
   unitPrice: number;
 }
 
+export class EventScheduleDto {
+  @IsDateString()
+  date: string;
+
+  @IsString()
+  @IsNotEmpty()
+  startTime: string;
+
+  @IsString()
+  @IsNotEmpty()
+  endTime: string;
+}
+
 export class CreateEventFolderDto {
   // Client — either provide userId or client info for auto-creation
   @IsOptional()
@@ -53,11 +66,10 @@ export class CreateEventFolderDto {
   @IsEnum(EventType)
   eventType: EventType;
 
-  @IsDateString()
-  start: string;
-
-  @IsDateString()
-  end: string;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => EventScheduleDto)
+  schedules: EventScheduleDto[];
 
   @IsInt()
   @Min(1)
@@ -81,4 +93,25 @@ export class CreateEventFolderDto {
   @IsOptional()
   @IsDateString()
   validUntil?: string;
+
+  // New Pricing Fields
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  basePrice?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  depositAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  cautionAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  remainingBalance?: number;
 }

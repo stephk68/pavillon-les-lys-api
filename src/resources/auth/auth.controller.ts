@@ -7,16 +7,20 @@ import {
   Post,
   UseGuards,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Public } from "../../common/decorators/public.decorator";
 import { AuthenticationGuard } from "../../common/guards/authentication.guard";
 import { AuthService } from "./auth.service";
 import { ChangePasswordDto } from "./dto/change-password.dto";
+import { CheckIdentityDto } from "./dto/check-identity.dto";
 import { FirstLoginPasswordDto } from "./dto/first-login-password.dto";
 import { ForgotPasswordDto } from "./dto/forgot-password.dto";
 import { LoginDto } from "./dto/login.dto";
 import { RegisterDto } from "./dto/register.dto";
 import { ResetPasswordDto } from "./dto/reset-password.dto";
+import { SetFirstPasswordDto } from "./dto/set-first-password.dto";
+import { VerifyOtpDto } from "./dto/verify-otp.dto";
 
 @Controller("auth")
 export class AuthController {
@@ -24,6 +28,7 @@ export class AuthController {
 
   // Route publique pour l'inscription
   @Public()
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   @Post("register")
   async register(@Body() registerDto: RegisterDto) {
     return this.authService.register(registerDto);
@@ -31,6 +36,7 @@ export class AuthController {
 
   // Route publique pour la connexion
   @Public()
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   @Post("login")
   @HttpCode(HttpStatus.OK)
   async login(@Body() loginDto: LoginDto) {
@@ -39,6 +45,7 @@ export class AuthController {
 
   // Route publique pour la demande de réinitialisation de mot de passe
   @Public()
+  @Throttle({ default: { ttl: 60000, limit: 3 } })
   @Post("forgot-password")
   @HttpCode(HttpStatus.OK)
   async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
@@ -98,11 +105,11 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async changePasswordFirstLogin(
     @CurrentUser() user: any,
-    @Body() firstLoginPasswordDto: FirstLoginPasswordDto
+    @Body() firstLoginPasswordDto: FirstLoginPasswordDto,
   ) {
     return this.authService.changePasswordFirstLogin(
       user.id,
-      firstLoginPasswordDto
+      firstLoginPasswordDto,
     );
   }
 
@@ -112,8 +119,36 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async changePassword(
     @CurrentUser() user: any,
-    @Body() changePasswordDto: ChangePasswordDto
+    @Body() changePasswordDto: ChangePasswordDto,
   ) {
     return this.authService.changePassword(user.id, changePasswordDto);
+  }
+
+  // ==================== IDENTITY-FIRST FLOW ====================
+
+  // Vérifie l'identité et détermine le statut du compte
+  @Public()
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
+  @Post("check-identity")
+  @HttpCode(HttpStatus.OK)
+  async checkIdentity(@Body() checkIdentityDto: CheckIdentityDto) {
+    return this.authService.checkIdentity(checkIdentityDto);
+  }
+
+  // Vérifie le code OTP et retourne un token temporaire
+  @Public()
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
+  @Post("verify-otp")
+  @HttpCode(HttpStatus.OK)
+  async verifyOtp(@Body() verifyOtpDto: VerifyOtpDto) {
+    return this.authService.verifyOtp(verifyOtpDto);
+  }
+
+  // Définit le mot de passe lors de la première connexion (après OTP)
+  @Public()
+  @Post("set-first-password")
+  @HttpCode(HttpStatus.OK)
+  async setFirstPassword(@Body() setFirstPasswordDto: SetFirstPasswordDto) {
+    return this.authService.setFirstPassword(setFirstPasswordDto);
   }
 }

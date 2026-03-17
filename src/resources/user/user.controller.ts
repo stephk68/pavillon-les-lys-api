@@ -106,6 +106,12 @@ export class UserController {
     return this.userService.getUsersByRole(role);
   }
 
+  // Utilisateur connecté — retourne son propre profil
+  @Get("me")
+  async getMe(@CurrentUser() currentUser: any) {
+    return this.userService.findOne(currentUser.id);
+  }
+
   // Utilisateur peut voir son propre profil, admins et staff peuvent voir tous les profils
   @Get(":id")
   async findOne(

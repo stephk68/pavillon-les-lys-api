@@ -13,7 +13,10 @@ import {
 } from "@prisma/client";
 import * as bcrypt from "bcrypt";
 import { PrismaService } from "../../common/services/prisma.service";
+import { MailService } from "../../mail/mail.service";
+import { AuditLogService } from "../audit-log/audit-log.service";
 import { CreateEventFolderDto } from "./dto/create-event-folder.dto";
+import { CreateReservationRequestDto } from "./dto/create-reservation-request.dto";
 import { AddEquipmentDto, UpdateEquipmentDto } from "./dto/equipment.dto";
 import { UpdateEventFolderDto } from "./dto/update-event-folder.dto";
 
@@ -60,15 +63,37 @@ const VALID_TRANSITIONS: Record<EventStatus, EventStatus[]> = {
 export class EventFolderService {
   private readonly logger = new Logger(EventFolderService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLogService: AuditLogService,
+    private readonly mailService: MailService,
+  ) {}
 
   // ==================== HELPERS ====================
 
-  private generateNumber(): string {
+  private async generateNumber(
+    tx?: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
+  ): Promise<string> {
+    const db = tx || this.prisma;
     const now = new Date();
     const year = now.getFullYear();
-    const seq = Math.random().toString(36).substring(2, 6).toUpperCase();
-    return `EVT-${year}-${seq}`;
+
+    const folders = await db.eventFolder.findMany({
+      where: {
+        folderNumber: { startsWith: `EVT-${year}-` },
+      },
+      select: { folderNumber: true },
+    });
+
+    let maxSeq = 0;
+    for (const f of folders) {
+      const seq = parseInt(f.folderNumber.split("-")[2], 10);
+      if (!isNaN(seq) && seq > maxSeq) {
+        maxSeq = seq;
+      }
+    }
+
+    return `EVT-${year}-${String(maxSeq + 1).padStart(4, "0")}`;
   }
 
   private calculateTotals(items: { quantity: number; unitPrice: number }[]) {
@@ -97,6 +122,7 @@ export class EventFolderService {
           role: true,
         },
       },
+      schedules: { orderBy: { date: "asc" as const } },
       items: { orderBy: { createdAt: "asc" as const } },
       payments: { orderBy: { createdAt: "asc" as const } },
       checklist: { orderBy: { displayOrder: "asc" as const } },
@@ -112,24 +138,30 @@ export class EventFolderService {
   // ==================== ATOMIC CREATION ====================
 
   async create(dto: CreateEventFolderDto, createdBy?: string) {
-    const startDate = new Date(dto.start);
-    const endDate = new Date(dto.end);
-
-    if (endDate <= startDate) {
+    if (!dto.schedules || dto.schedules.length === 0) {
       throw new BadRequestException(
-        "La date de fin doit être postérieure à la date de début",
+        "Au moins un horaire (schedule) est requis",
       );
     }
 
+    // Check validity of schedules
+    for (const s of dto.schedules) {
+      if (s.endTime <= s.startTime) {
+        throw new BadRequestException(
+          "L'heure de fin doit être postérieure à l'heure de début pour chaque jour",
+        );
+      }
+    }
+
     // Check availability
-    const isAvailable = await this.checkAvailability(startDate, endDate);
+    const isAvailable = await this.checkAvailability(dto.schedules);
     if (!isAvailable) {
       throw new ConflictException(
         "La salle n'est pas disponible pour les dates sélectionnées",
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // 1) Resolve or create user
       let userId = dto.userId;
       let isNewClient = false;
@@ -144,7 +176,10 @@ export class EventFolderService {
           userId = existing.id;
         } else {
           // Auto-create client
-          const tempPassword = Math.random().toString(36).slice(-10);
+          const tempPassword = require("crypto")
+            .randomBytes(12)
+            .toString("base64url")
+            .slice(0, 16);
           const hashedPassword = await bcrypt.hash(tempPassword, 10);
 
           const newUser = await tx.user.create({
@@ -177,17 +212,29 @@ export class EventFolderService {
       );
 
       // 3) Create the event folder
+      const folderNumber = await this.generateNumber(tx);
       const eventFolder = await tx.eventFolder.create({
         data: {
-          folderNumber: this.generateNumber(),
+          folderNumber,
           userId,
           eventType: dto.eventType,
-          start: startDate,
-          end: endDate,
+          schedules: {
+            create: dto.schedules.map((s) => ({
+              date: new Date(s.date),
+              startTime: s.startTime,
+              endTime: s.endTime,
+            })),
+          },
           attendees: dto.attendees,
           description: dto.description,
           specialRequests: dto.specialRequests,
           status: EventStatus.PROSPECT,
+
+          basePrice: dto.basePrice || 0,
+          depositAmount: dto.depositAmount || 0,
+          cautionAmount: dto.cautionAmount || 0,
+          remainingBalance: dto.remainingBalance || 0,
+
           totalHT: totals.totalHT,
           vatRate: totals.vatRate,
           totalTTC: totals.totalTTC,
@@ -232,6 +279,57 @@ export class EventFolderService {
 
       return { eventFolder, client, isNewClient };
     });
+
+    // Audit log for folder creation (fire-and-forget)
+    this.auditLogService
+      .create({
+        action: "FOLDER_CREATED",
+        description: `Nouveau dossier ${result.eventFolder.folderNumber} créé`,
+        entityType: "EventFolder",
+        entityId: result.eventFolder.id,
+        folderNumber: result.eventFolder.folderNumber,
+        userId: createdBy || result.eventFolder.userId,
+      })
+      .catch(() => {});
+
+    return result;
+  }
+
+  // ==================== PUBLIC RESERVATION REQUEST ====================
+
+  async createPublicRequest(dto: CreateReservationRequestDto) {
+    // Map to existing create flow
+    const createDto: CreateEventFolderDto = {
+      clientEmail: dto.email,
+      clientFirstName: dto.firstName,
+      clientLastName: dto.lastName,
+      clientPhone: dto.phone,
+      eventType: dto.eventType,
+      schedules: [
+        {
+          date: dto.date,
+          startTime: "10:00",
+          endTime: "23:00",
+        },
+      ],
+      attendees: dto.guestCount,
+      description: dto.description,
+    };
+
+    const result = await this.create(createDto);
+
+    // Send welcome email if new client
+    if (result.isNewClient && result.client) {
+      this.mailService.sendWelcomeEmail(result.client).catch((err) => {
+        this.logger.warn(`Failed to send welcome email: ${err.message}`);
+      });
+    }
+
+    return {
+      message: "Votre demande de réservation a été enregistrée avec succès",
+      folderNumber: result.eventFolder.folderNumber,
+      isNewClient: result.isNewClient,
+    };
   }
 
   // ==================== READ ====================
@@ -240,6 +338,7 @@ export class EventFolderService {
     status?: EventStatus;
     eventType?: string;
     userId?: string;
+    search?: string;
     skip?: number;
     take?: number;
     startDate?: Date;
@@ -250,17 +349,37 @@ export class EventFolderService {
     if (options?.status) where.status = options.status;
     if (options?.eventType) where.eventType = options.eventType as any;
     if (options?.userId) where.userId = options.userId;
+    if (options?.search) {
+      where.OR = [
+        { folderNumber: { contains: options.search, mode: "insensitive" } },
+        {
+          user: {
+            firstName: { contains: options.search, mode: "insensitive" },
+          },
+        },
+        {
+          user: { lastName: { contains: options.search, mode: "insensitive" } },
+        },
+        { user: { email: { contains: options.search, mode: "insensitive" } } },
+        { description: { contains: options.search, mode: "insensitive" } },
+      ];
+    }
     if (options?.startDate || options?.endDate) {
-      where.start = {};
-      if (options.startDate) where.start.gte = options.startDate;
-      if (options.endDate) where.start.lte = options.endDate;
+      const datesWhere: any = {};
+      if (options.startDate) datesWhere.gte = options.startDate;
+      if (options.endDate) datesWhere.lte = options.endDate;
+      where.schedules = {
+        some: {
+          date: datesWhere,
+        },
+      };
     }
 
     const [data, total] = await Promise.all([
       this.prisma.eventFolder.findMany({
         where,
         include: this.fullInclude(),
-        orderBy: { start: "asc" },
+        orderBy: { createdAt: "desc" },
         skip: options?.skip || 0,
         take: options?.take || 50,
       }),
@@ -288,17 +407,21 @@ export class EventFolderService {
     const folder = await this.findOne(id);
 
     // If dates changed, re-check availability
-    if (dto.start || dto.end) {
-      const newStart = dto.start ? new Date(dto.start) : folder.start;
-      const newEnd = dto.end ? new Date(dto.end) : folder.end;
-
-      if (newEnd <= newStart) {
+    if (dto.schedules) {
+      if (dto.schedules.length === 0) {
         throw new BadRequestException(
-          "La date de fin doit être postérieure à la date de début",
+          "Un dossier doit avoir au moins un horaire.",
         );
       }
+      for (const s of dto.schedules) {
+        if (s.endTime <= s.startTime) {
+          throw new BadRequestException(
+            "L'heure de fin doit être postérieure à l'heure de début pour chaque jour",
+          );
+        }
+      }
 
-      const isAvailable = await this.checkAvailability(newStart, newEnd, id);
+      const isAvailable = await this.checkAvailability(dto.schedules, id);
       if (!isAvailable) {
         throw new ConflictException(
           "La salle n'est pas disponible pour les dates sélectionnées",
@@ -309,48 +432,80 @@ export class EventFolderService {
     // Build update data
     const updateData: Prisma.EventFolderUpdateInput = {
       ...(dto.eventType && { eventType: dto.eventType }),
-      ...(dto.start && { start: new Date(dto.start) }),
-      ...(dto.end && { end: new Date(dto.end) }),
       ...(dto.attendees && { attendees: dto.attendees }),
       ...(dto.description !== undefined && { description: dto.description }),
       ...(dto.specialRequests !== undefined && {
         specialRequests: dto.specialRequests,
       }),
       ...(dto.validUntil && { validUntil: new Date(dto.validUntil) }),
+      ...(dto.basePrice !== undefined && { basePrice: dto.basePrice }),
+      ...(dto.depositAmount !== undefined && {
+        depositAmount: dto.depositAmount,
+      }),
+      ...(dto.cautionAmount !== undefined && {
+        cautionAmount: dto.cautionAmount,
+      }),
+      ...(dto.remainingBalance !== undefined && {
+        remainingBalance: dto.remainingBalance,
+      }),
       version: { increment: 1 },
       updatedBy,
     };
 
-    // If items provided, recreate them
-    if (dto.items) {
-      const totals = this.calculateTotals(
-        dto.items.map((i) => ({
-          quantity: i.quantity,
-          unitPrice: i.unitPrice,
-        })),
-      );
-      updateData.totalHT = totals.totalHT;
-      updateData.vatRate = totals.vatRate;
-      updateData.totalTTC = totals.totalTTC;
+    // If items or schedules provided, handle in transaction
+    if (dto.items || dto.schedules) {
+      const totals = dto.items
+        ? this.calculateTotals(
+            dto.items.map((i) => ({
+              quantity: i.quantity,
+              unitPrice: i.unitPrice,
+            })),
+          )
+        : undefined;
 
-      // Delete existing items and create new ones in a transaction
+      if (totals) {
+        updateData.totalHT = totals.totalHT;
+        updateData.vatRate = totals.vatRate;
+        updateData.totalTTC = totals.totalTTC;
+      }
+
       return this.prisma.$transaction(async (tx) => {
-        await tx.eventFolderItem.deleteMany({
-          where: { eventFolderId: id },
-        });
+        // Recreate items if provided
+        if (dto.items) {
+          await tx.eventFolderItem.deleteMany({
+            where: { eventFolderId: id },
+          });
+        }
+        // Recreate schedules if provided
+        if (dto.schedules) {
+          await tx.eventSchedule.deleteMany({ where: { eventFolderId: id } });
+        }
 
         return tx.eventFolder.update({
           where: { id },
           data: {
             ...updateData,
-            items: {
-              create: dto.items!.map((item) => ({
-                description: item.description,
-                quantity: item.quantity,
-                unitPrice: new Prisma.Decimal(item.unitPrice),
-                totalPrice: new Prisma.Decimal(item.quantity * item.unitPrice),
-              })),
-            },
+            ...(dto.items && {
+              items: {
+                create: dto.items.map((item) => ({
+                  description: item.description,
+                  quantity: item.quantity,
+                  unitPrice: new Prisma.Decimal(item.unitPrice),
+                  totalPrice: new Prisma.Decimal(
+                    item.quantity * item.unitPrice,
+                  ),
+                })),
+              },
+            }),
+            ...(dto.schedules && {
+              schedules: {
+                create: dto.schedules.map((s) => ({
+                  date: new Date(s.date),
+                  startTime: s.startTime,
+                  endTime: s.endTime,
+                })),
+              },
+            }),
           },
           include: this.fullInclude(),
         });
@@ -474,20 +629,25 @@ export class EventFolderService {
           );
         }
 
-        const equipmentCount = await this.prisma.eventEquipment.count({
-          where: { eventFolderId: id },
+        // Auto-complete any remaining checklist items
+        await this.prisma.checklistItem.updateMany({
+          where: { eventFolderId: id, completed: false },
+          data: { completed: true, completedAt: new Date() },
         });
-        if (equipmentCount === 0) {
-          throw new BadRequestException(
-            "Au moins un équipement doit être assigné pour passer en READY",
-          );
-        }
         break;
       }
 
       case EventStatus.COMPLETED: {
-        // Event end date must be in the past
-        if (new Date(folder.end) > new Date()) {
+        if (!folder.schedules || folder.schedules.length === 0) {
+          throw new BadRequestException(
+            "Aucun horaire défini pour cet événement",
+          );
+        }
+        const lastSchedule = folder.schedules.sort(
+          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+        )[0];
+
+        if (new Date(lastSchedule.date) > new Date()) {
           throw new BadRequestException(
             "L'événement n'est pas encore terminé (date de fin dans le futur)",
           );
@@ -527,6 +687,61 @@ export class EventFolderService {
     this.logger.log(
       `Dossier ${folder.folderNumber}: ${currentStatus} → ${targetStatus}`,
     );
+
+    // Audit log for status transition (fire-and-forget)
+    this.auditLogService
+      .create({
+        action: "STATUS_CHANGE",
+        description: `Dossier ${folder.folderNumber} : ${currentStatus} → ${targetStatus}`,
+        entityType: "EventFolder",
+        entityId: id,
+        folderNumber: folder.folderNumber,
+        userId: updatedBy || folder.userId,
+      })
+      .catch(() => {});
+
+    // Envoi d'emails selon la transition (fire-and-forget)
+    const user = updated.user || folder.user;
+    if (user) {
+      switch (targetStatus) {
+        case EventStatus.QUOTED:
+          this.mailService
+            .sendContract(
+              {
+                email: user.email,
+                firstName: user.firstName,
+                lastName: user.lastName,
+              },
+              updated,
+            )
+            .catch(() => {});
+          break;
+        case EventStatus.BOOKED:
+          this.mailService
+            .sendBookingConfirmation(
+              {
+                email: user.email,
+                firstName: user.firstName,
+                lastName: user.lastName,
+              },
+              updated,
+            )
+            .catch(() => {});
+          break;
+        case EventStatus.COMPLETED:
+          this.mailService
+            .sendFeedbackRequest(
+              {
+                email: user.email,
+                firstName: user.firstName,
+                lastName: user.lastName,
+              },
+              updated,
+            )
+            .catch(() => {});
+          break;
+      }
+    }
 
     return updated;
   }
@@ -611,7 +826,10 @@ export class EventFolderService {
     const solde = totalTTC - acompte;
     const caution = Number(process.env.CAUTION_AMOUNT || 100000); // Default 100,000 XOF
 
-    const startDate = new Date(folder.start);
+    if (!folder.schedules || folder.schedules.length === 0) {
+      throw new BadRequestException("Le dossier n'a pas d'horaires définis.");
+    }
+    const startDate = new Date(folder.schedules[0].date);
     const j21 = new Date(startDate.getTime() - 21 * 24 * 60 * 60 * 1000);
     const j14 = new Date(startDate.getTime() - 14 * 24 * 60 * 60 * 1000);
 
@@ -658,24 +876,24 @@ export class EventFolderService {
   // ==================== AVAILABILITY & CALENDAR ====================
 
   async checkAvailability(
-    start: Date,
-    end: Date,
+    schedules: { date: string | Date; startTime: string; endTime: string }[],
     excludeId?: string,
   ): Promise<boolean> {
-    const where: Prisma.EventFolderWhereInput = {
-      status: {
-        in: [EventStatus.BOOKED, EventStatus.READY, EventStatus.QUOTED],
+    const conflicts = await this.prisma.eventSchedule.count({
+      where: {
+        eventFolder: {
+          status: {
+            in: [EventStatus.BOOKED, EventStatus.READY, EventStatus.QUOTED],
+          },
+          ...(excludeId ? { id: { not: excludeId } } : {}),
+        },
+        OR: schedules.map((s) => ({
+          date: new Date(s.date),
+          startTime: { lt: s.endTime },
+          endTime: { gt: s.startTime },
+        })),
       },
-      OR: [
-        { start: { lt: end }, end: { gt: start } }, // Overlap detection
-      ],
-    };
-
-    if (excludeId) {
-      where.id = { not: excludeId };
-    }
-
-    const conflicts = await this.prisma.eventFolder.count({ where });
+    });
     return conflicts === 0;
   }
 
@@ -689,11 +907,11 @@ export class EventFolderService {
     if (month && year) {
       const startOfMonth = new Date(year, month - 1, 1);
       const endOfMonth = new Date(year, month, 0, 23, 59, 59);
-      where.OR = [
-        { start: { gte: startOfMonth, lte: endOfMonth } },
-        { end: { gte: startOfMonth, lte: endOfMonth } },
-        { start: { lte: startOfMonth }, end: { gte: endOfMonth } },
-      ];
+      where.schedules = {
+        some: {
+          date: { gte: startOfMonth, lte: endOfMonth },
+        },
+      };
     }
 
     const events = await this.prisma.eventFolder.findMany({
@@ -701,16 +919,49 @@ export class EventFolderService {
       select: {
         id: true,
         folderNumber: true,
-        start: true,
-        end: true,
+        schedules: {
+          select: {
+            date: true,
+            startTime: true,
+            endTime: true,
+          },
+        },
         eventType: true,
         status: true,
         attendees: true,
       },
-      orderBy: { start: "asc" },
+      orderBy: { createdAt: "asc" },
     });
 
     return events;
+  }
+
+  /**
+   * Returns an array of booked date strings (YYYY-MM-DD) for a given month.
+   * Public endpoint — no sensitive data exposed.
+   */
+  async getBookedDates(month?: number, year?: number): Promise<string[]> {
+    const now = new Date();
+    const m = month ?? now.getMonth() + 1;
+    const y = year ?? now.getFullYear();
+
+    const startOfMonth = new Date(y, m - 1, 1);
+    const endOfMonth = new Date(y, m, 0, 23, 59, 59);
+
+    const schedules = await this.prisma.eventSchedule.findMany({
+      where: {
+        date: { gte: startOfMonth, lte: endOfMonth },
+        eventFolder: {
+          status: {
+            in: [EventStatus.BOOKED, EventStatus.READY],
+          },
+        },
+      },
+      select: { date: true },
+    });
+
+    const dates = schedules.map((s) => s.date.toISOString().split("T")[0]);
+    return [...new Set(dates)];
   }
 
   // ==================== EQUIPMENT MANAGEMENT ====================
@@ -903,15 +1154,19 @@ export class EventFolderService {
   // ==================== STATS ====================
 
   async getStats() {
-    const [byStatus, total, upcoming] = await Promise.all([
+    const [byStatus, byEventType, total, upcoming] = await Promise.all([
       this.prisma.eventFolder.groupBy({
         by: ["status"],
+        _count: { _all: true },
+      }),
+      this.prisma.eventFolder.groupBy({
+        by: ["eventType"],
         _count: { _all: true },
       }),
       this.prisma.eventFolder.count(),
       this.prisma.eventFolder.count({
         where: {
-          start: { gte: new Date() },
+          schedules: { some: { date: { gte: new Date() } } },
           status: { in: [EventStatus.BOOKED, EventStatus.READY] },
         },
       }),
@@ -924,6 +1179,10 @@ export class EventFolderService {
         (acc, s) => ({ ...acc, [s.status]: s._count._all }),
         {},
       ),
+      byEventType: byEventType.reduce(
+        (acc, s) => ({ ...acc, [s.eventType]: s._count._all }),
+        {},
+      ),
     };
   }
 
@@ -933,11 +1192,11 @@ export class EventFolderService {
 
     return this.prisma.eventFolder.findMany({
       where: {
-        start: { gte: new Date(), lte: future },
+        schedules: { some: { date: { gte: new Date(), lte: future } } },
         status: { in: [EventStatus.BOOKED, EventStatus.READY] },
       },
       include: this.fullInclude(),
-      orderBy: { start: "asc" },
+      orderBy: { createdAt: "asc" },
     });
   }
 }

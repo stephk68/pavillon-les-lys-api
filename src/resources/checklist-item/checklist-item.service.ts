@@ -1,8 +1,12 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { ChecklistItem } from "@prisma/client";
 import { PrismaService } from "../../common/services/prisma.service";
-import { CreateChekclistItemDto } from "./dto/create-chekclist-item.dto";
-import { UpdateChekclistItemDto } from "./dto/update-chekclist-item.dto";
+import { CreateChecklistItemDto } from "./dto/create-checklist-item.dto";
+import { UpdateChecklistItemDto } from "./dto/update-checklist-item.dto";
 
 interface FindAllOptions {
   eventFolderId?: string;
@@ -21,29 +25,29 @@ export interface ChecklistStats {
 }
 
 @Injectable()
-export class ChekclistItemService {
+export class ChecklistItemService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
    * Créer un nouvel élément de checklist
    */
   async create(
-    createChekclistItemDto: CreateChekclistItemDto,
+    createChecklistItemDto: CreateChecklistItemDto,
   ): Promise<ChecklistItem> {
     // Vérifier que le dossier événement existe
     const eventFolder = await this.prisma.eventFolder.findUnique({
-      where: { id: createChekclistItemDto.eventFolderId },
+      where: { id: createChecklistItemDto.eventFolderId },
     });
 
     if (!eventFolder) {
       throw new NotFoundException(
-        `Dossier événement avec l'ID ${createChekclistItemDto.eventFolderId} non trouvé`,
+        `Dossier événement avec l'ID ${createChecklistItemDto.eventFolderId} non trouvé`,
       );
     }
 
     // Obtenir le prochain ordre d'affichage
     const maxOrder = await this.prisma.checklistItem.aggregate({
-      where: { eventFolderId: createChekclistItemDto.eventFolderId },
+      where: { eventFolderId: createChecklistItemDto.eventFolderId },
       _max: { displayOrder: true },
     });
 
@@ -51,12 +55,12 @@ export class ChekclistItemService {
 
     return this.prisma.checklistItem.create({
       data: {
-        title: createChekclistItemDto.title,
-        description: createChekclistItemDto.description,
-        eventFolderId: createChekclistItemDto.eventFolderId,
-        assignedTo: createChekclistItemDto.assignedTo,
-        dueAt: createChekclistItemDto.dueAt
-          ? new Date(createChekclistItemDto.dueAt)
+        title: createChecklistItemDto.title,
+        description: createChecklistItemDto.description,
+        eventFolderId: createChecklistItemDto.eventFolderId,
+        assignedTo: createChecklistItemDto.assignedTo,
+        dueAt: createChecklistItemDto.dueAt
+          ? new Date(createChecklistItemDto.dueAt)
           : undefined,
         displayOrder: nextOrder,
       },
@@ -65,7 +69,7 @@ export class ChekclistItemService {
           select: {
             id: true,
             eventType: true,
-            start: true,
+            schedules: { select: { date: true } },
           },
         },
       },
@@ -100,7 +104,7 @@ export class ChekclistItemService {
             select: {
               id: true,
               eventType: true,
-              start: true,
+              schedules: { select: { date: true } },
             },
           },
         },
@@ -128,8 +132,7 @@ export class ChekclistItemService {
           select: {
             id: true,
             eventType: true,
-            start: true,
-            end: true,
+            schedules: { select: { date: true } },
           },
         },
       },
@@ -170,28 +173,28 @@ export class ChekclistItemService {
    */
   async update(
     id: string,
-    updateChekclistItemDto: UpdateChekclistItemDto,
+    updateChecklistItemDto: UpdateChecklistItemDto,
   ): Promise<ChecklistItem> {
     await this.findOne(id); // Vérifier l'existence
 
     const data: any = {};
 
-    if (updateChekclistItemDto.title !== undefined) {
-      data.title = updateChekclistItemDto.title;
+    if (updateChecklistItemDto.title !== undefined) {
+      data.title = updateChecklistItemDto.title;
     }
-    if (updateChekclistItemDto.description !== undefined) {
-      data.description = updateChekclistItemDto.description;
+    if (updateChecklistItemDto.description !== undefined) {
+      data.description = updateChecklistItemDto.description;
     }
-    if (updateChekclistItemDto.completed !== undefined) {
-      data.completed = updateChekclistItemDto.completed;
-      data.completedAt = updateChekclistItemDto.completed ? new Date() : null;
+    if (updateChecklistItemDto.completed !== undefined) {
+      data.completed = updateChecklistItemDto.completed;
+      data.completedAt = updateChecklistItemDto.completed ? new Date() : null;
     }
-    if (updateChekclistItemDto.assignedTo !== undefined) {
-      data.assignedTo = updateChekclistItemDto.assignedTo;
+    if (updateChecklistItemDto.assignedTo !== undefined) {
+      data.assignedTo = updateChecklistItemDto.assignedTo;
     }
-    if (updateChekclistItemDto.dueAt !== undefined) {
-      data.dueAt = updateChekclistItemDto.dueAt
-        ? new Date(updateChekclistItemDto.dueAt)
+    if (updateChecklistItemDto.dueAt !== undefined) {
+      data.dueAt = updateChecklistItemDto.dueAt
+        ? new Date(updateChecklistItemDto.dueAt)
         : null;
     }
 
@@ -203,7 +206,7 @@ export class ChekclistItemService {
           select: {
             id: true,
             eventType: true,
-            start: true,
+            schedules: { select: { date: true } },
           },
         },
       },
@@ -268,15 +271,26 @@ export class ChekclistItemService {
       );
     }
 
-    // Mettre à jour l'ordre de chaque élément
-    const updates = itemIds.map((id, index) =>
-      this.prisma.checklistItem.update({
-        where: { id },
-        data: { displayOrder: index + 1 },
-      }),
-    );
+    // Vérifier que tous les IDs appartiennent bien à ce dossier
+    const items = await this.prisma.checklistItem.findMany({
+      where: { id: { in: itemIds }, eventFolderId },
+      select: { id: true },
+    });
+    if (items.length !== itemIds.length) {
+      throw new BadRequestException(
+        "Certains éléments n'appartiennent pas à ce dossier",
+      );
+    }
 
-    await Promise.all(updates);
+    // Mettre à jour l'ordre dans une transaction
+    await this.prisma.$transaction(
+      itemIds.map((id, index) =>
+        this.prisma.checklistItem.update({
+          where: { id },
+          data: { displayOrder: index + 1 },
+        }),
+      ),
+    );
 
     return this.findByEventFolder(eventFolderId);
   }

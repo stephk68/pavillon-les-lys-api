@@ -1,7 +1,7 @@
 import {
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
+    ForbiddenException,
+    Injectable,
+    NotFoundException,
 } from "@nestjs/common";
 import { Feedback } from "@prisma/client";
 import { PrismaService } from "../../common/services/prisma.service";
@@ -58,8 +58,7 @@ export class FeedbackService {
           select: {
             id: true,
             eventType: true,
-            start: true,
-            end: true,
+            schedules: { select: { date: true } },
           },
         },
       },
@@ -112,8 +111,7 @@ export class FeedbackService {
             select: {
               id: true,
               eventType: true,
-              start: true,
-              end: true,
+              schedules: { select: { date: true } },
             },
           },
         },
@@ -149,8 +147,7 @@ export class FeedbackService {
           select: {
             id: true,
             eventType: true,
-            start: true,
-            end: true,
+            schedules: { select: { date: true } },
           },
         },
       },
@@ -276,7 +273,7 @@ export class FeedbackService {
           select: {
             id: true,
             eventType: true,
-            start: true,
+            schedules: { select: { date: true } },
           },
         },
       },

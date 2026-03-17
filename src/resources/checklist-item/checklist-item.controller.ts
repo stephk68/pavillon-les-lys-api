@@ -16,23 +16,23 @@ import { Role } from "@prisma/client";
 import { Roles } from "../../common/decorators/permission.decorator";
 import { AuthenticationGuard } from "../../common/guards/authentication.guard";
 import { AuthorizationGuard } from "../../common/guards/authorization.guard";
-import { ChekclistItemService } from "./chekclist-item.service";
-import { CreateChekclistItemDto } from "./dto/create-chekclist-item.dto";
-import { UpdateChekclistItemDto } from "./dto/update-chekclist-item.dto";
+import { ChecklistItemService } from "./checklist-item.service";
+import { CreateChecklistItemDto } from "./dto/create-checklist-item.dto";
+import { UpdateChecklistItemDto } from "./dto/update-checklist-item.dto";
 
-@Controller("checklist-item")
+@Controller("checklist-items")
 @UseGuards(AuthenticationGuard, AuthorizationGuard)
 @Roles(Role.ADMIN, Role.EVENT_MANAGER) // Toutes les routes sont admin/staff uniquement
-export class ChekclistItemController {
-  constructor(private readonly chekclistItemService: ChekclistItemService) {}
+export class ChecklistItemController {
+  constructor(private readonly checklistItemService: ChecklistItemService) {}
 
   /**
    * POST /checklist-item
    * Créer un nouvel élément de checklist
    */
   @Post()
-  async create(@Body() createChekclistItemDto: CreateChekclistItemDto) {
-    return this.chekclistItemService.create(createChekclistItemDto);
+  async create(@Body() createChecklistItemDto: CreateChecklistItemDto) {
+    return this.checklistItemService.create(createChecklistItemDto);
   }
 
   /**
@@ -55,7 +55,7 @@ export class ChekclistItemController {
       take: take ? parseInt(take, 10) : undefined,
     };
 
-    return this.chekclistItemService.findAll(options);
+    return this.checklistItemService.findAll(options);
   }
 
   /**
@@ -64,7 +64,7 @@ export class ChekclistItemController {
    */
   @Get("stats")
   async getStats(@Query("eventFolderId") eventFolderId?: string) {
-    return this.chekclistItemService.getStats(eventFolderId);
+    return this.checklistItemService.getStats(eventFolderId);
   }
 
   /**
@@ -75,7 +75,7 @@ export class ChekclistItemController {
   async findByEventFolder(
     @Param("eventFolderId", ParseUUIDPipe) eventFolderId: string,
   ) {
-    return this.chekclistItemService.findByEventFolder(eventFolderId);
+    return this.checklistItemService.findByEventFolder(eventFolderId);
   }
 
   /**
@@ -84,7 +84,7 @@ export class ChekclistItemController {
    */
   @Get(":id")
   async findOne(@Param("id", ParseUUIDPipe) id: string) {
-    return this.chekclistItemService.findOne(id);
+    return this.checklistItemService.findOne(id);
   }
 
   /**
@@ -94,9 +94,9 @@ export class ChekclistItemController {
   @Patch(":id")
   async update(
     @Param("id", ParseUUIDPipe) id: string,
-    @Body() updateChekclistItemDto: UpdateChekclistItemDto,
+    @Body() updateChecklistItemDto: UpdateChecklistItemDto,
   ) {
-    return this.chekclistItemService.update(id, updateChekclistItemDto);
+    return this.checklistItemService.update(id, updateChecklistItemDto);
   }
 
   /**
@@ -109,7 +109,7 @@ export class ChekclistItemController {
     @Param("id", ParseUUIDPipe) id: string,
     @Body("notes") notes?: string,
   ) {
-    return this.chekclistItemService.markAsCompleted(id, notes);
+    return this.checklistItemService.markAsCompleted(id, notes);
   }
 
   /**
@@ -119,33 +119,28 @@ export class ChekclistItemController {
   @Patch(":id/incomplete")
   @HttpCode(HttpStatus.OK)
   async markAsIncomplete(@Param("id", ParseUUIDPipe) id: string) {
-    return this.chekclistItemService.markAsIncomplete(id);
+    return this.checklistItemService.markAsIncomplete(id);
   }
 
   /**
    * PATCH /checklist-item/event-folder/:eventFolderId/reorder
-   * Réorganiser les éléments d'un dossier événement
+   * Réorganiser les éléments d'un dossier
    */
   @Patch("event-folder/:eventFolderId/reorder")
-  @HttpCode(HttpStatus.OK)
   async reorderItems(
     @Param("eventFolderId", ParseUUIDPipe) eventFolderId: string,
     @Body("itemIds") itemIds: string[],
   ) {
-    if (!itemIds || !Array.isArray(itemIds)) {
-      throw new Error("itemIds doit être un tableau d'identifiants");
-    }
-    return this.chekclistItemService.reorderItems(eventFolderId, itemIds);
+    return this.checklistItemService.reorderItems(eventFolderId, itemIds);
   }
 
   /**
    * DELETE /checklist-item/:id
-   * Supprimer un élément (admin uniquement)
+   * Supprimer un élément
    */
-  @Roles(Role.ADMIN)
   @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param("id", ParseUUIDPipe) id: string) {
-    await this.chekclistItemService.remove(id);
+    return this.checklistItemService.remove(id);
   }
 }

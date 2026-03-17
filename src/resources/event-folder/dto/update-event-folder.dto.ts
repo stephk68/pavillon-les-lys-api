@@ -1,16 +1,17 @@
 import { EventType } from "@prisma/client";
 import { Type } from "class-transformer";
 import {
-  IsArray,
-  IsDateString,
-  IsEnum,
-  IsInt,
-  IsOptional,
-  IsString,
-  Min,
-  ValidateNested,
+    IsArray,
+    IsDateString,
+    IsEnum,
+    IsInt,
+    IsNumber,
+    IsOptional,
+    IsString,
+    Min,
+    ValidateNested,
 } from "class-validator";
-import { EventFolderItemDto } from "./create-event-folder.dto";
+import { EventFolderItemDto, EventScheduleDto } from "./create-event-folder.dto";
 
 export class UpdateEventFolderDto {
   @IsOptional()
@@ -18,12 +19,10 @@ export class UpdateEventFolderDto {
   eventType?: EventType;
 
   @IsOptional()
-  @IsDateString()
-  start?: string;
-
-  @IsOptional()
-  @IsDateString()
-  end?: string;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => EventScheduleDto)
+  schedules?: EventScheduleDto[];
 
   @IsOptional()
   @IsInt()
@@ -47,4 +46,25 @@ export class UpdateEventFolderDto {
   @IsOptional()
   @IsDateString()
   validUntil?: string;
+
+  // New Pricing Fields
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  basePrice?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  depositAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  cautionAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  remainingBalance?: number;
 }

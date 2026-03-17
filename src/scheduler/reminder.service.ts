@@ -46,9 +46,10 @@ export class ReminderService {
     const folders = await this.prisma.eventFolder.findMany({
       where: {
         status: EventStatus.QUOTED,
-        start: {
-          gte: dayStart,
-          lte: dayEnd,
+        schedules: {
+          some: {
+            date: { gte: dayStart, lte: dayEnd }
+          }
         },
         reminderJ21SentAt: null, // Pas encore envoyé
       },
@@ -104,9 +105,10 @@ export class ReminderService {
     const folders = await this.prisma.eventFolder.findMany({
       where: {
         status: { in: [EventStatus.QUOTED, EventStatus.BOOKED] },
-        start: {
-          gte: dayStart,
-          lte: dayEnd,
+        schedules: {
+          some: {
+            date: { gte: dayStart, lte: dayEnd }
+          }
         },
         reminderJ14SentAt: null,
       },
