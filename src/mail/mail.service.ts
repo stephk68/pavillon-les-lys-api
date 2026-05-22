@@ -285,6 +285,33 @@ export class MailService {
   }
 
   /**
+   * Envoie un email de bienvenue aux nouveaux membres du staff créés par un admin.
+   * Invite le membre à se connecter au backoffice via le flux identité (OTP).
+   */
+  async sendStaffWelcomeEmail(user: any): Promise<void> {
+    const { email, firstName, lastName } = user;
+
+    try {
+      await this.mailerService.sendMail({
+        to: email,
+        subject: `Bienvenue dans l'équipe Pavillon Les Lys, ${firstName} !`,
+        template: "./welcome",
+        context: {
+          firstName,
+          lastName,
+          dashboardUrl: `${process.env.BACKOFFICE_URL ?? process.env.FRONTEND_URL}/login`,
+        },
+      });
+
+      this.logger.log(`✉️ Email de bienvenue staff envoyé à ${email}`);
+    } catch (error) {
+      this.logger.error(
+        `❌ Erreur envoi bienvenue staff à ${email}: ${error.message}`,
+      );
+    }
+  }
+
+  /**
    * Envoie un email de réinitialisation de mot de passe
    */
   async sendPasswordResetEmail(user: any, resetToken: string): Promise<void> {
@@ -298,7 +325,7 @@ export class MailService {
         context: {
           firstName,
           lastName,
-          resetUrl: `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`,
+          resetUrl: `${process.env.FRONTEND_URL}/auth/reset-password?token=${resetToken}`,
           expirationTime: "1 heure",
         },
       });

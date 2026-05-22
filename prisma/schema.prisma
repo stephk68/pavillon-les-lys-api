@@ -20,6 +20,7 @@ model User {
   lastName         String
   phone            String?
   role             Role          @default(CLIENT)
+  isActive         Boolean       @default(true)
   isFirstLogin     Boolean       @default(true)
   lastLoginAt      DateTime?
   resetToken       String?

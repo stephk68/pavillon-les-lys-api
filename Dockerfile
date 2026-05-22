@@ -29,6 +29,9 @@ COPY . .
 # Générer le client Prisma
 RUN npx prisma generate
 
+# Compiler l'application pour la production
+RUN yarn build
+
 # Créer un utilisateur non-root pour la sécurité
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nestjs -u 1001 -G nodejs
@@ -38,8 +41,8 @@ RUN chown -R nestjs:nodejs /app
 USER nestjs
 
 # Exposer le port
-EXPOSE 3000
+EXPOSE 4000
 
-# Commande de démarrage
-CMD ["sh", "-c", "yarn start:dev"]
+# Exécuter les migrations Prisma puis démarrer l'application compilée
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main"]
 

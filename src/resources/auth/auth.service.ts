@@ -67,6 +67,13 @@ export class AuthService {
       throw new UnauthorizedException("Email ou mot de passe incorrect");
     }
 
+    // Vérifier que le compte est actif
+    if (!user.isActive) {
+      throw new UnauthorizedException(
+        "Ce compte a été désactivé. Veuillez contacter un administrateur.",
+      );
+    }
+
     // Mettre à jour la dernière connexion
     await this.prisma.user.update({
       where: { id: user.id },

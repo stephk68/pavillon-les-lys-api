@@ -216,11 +216,11 @@ jobs:
       - name: 🔧 Setup SSH
         uses: webfactory/ssh-agent@v0.8.0
         with:
-          ssh-private-key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
 
       - name: 🚀 Deploy to staging server
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} << 'EOF'
+          ssh -o StrictHostKeyChecking=no -p ${{ secrets.VPS_SSH_PORT }} ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
             cd /opt/pavillon-les-lys-api
             docker-compose pull api
             docker-compose up -d api
@@ -251,21 +251,21 @@ jobs:
       - name: 🔧 Setup SSH
         uses: webfactory/ssh-agent@v0.8.0
         with:
-          ssh-private-key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
 
       - name: 🚀 Deploy to production server
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.PRODUCTION_USER }}@${{ secrets.PRODUCTION_HOST }} << 'EOF'
+          ssh -o StrictHostKeyChecking=no -p ${{ secrets.VPS_SSH_PORT }} ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
             cd /opt/pavillon-les-lys-api
-            
+
             # Backup current version
             docker-compose down api
             docker tag $(docker images --format "table {{.Repository}}:{{.Tag}}" | grep pavillon-les-lys | head -1) pavillon-les-lys:backup
-            
+
             # Deploy new version
             docker-compose pull api
             docker-compose up -d api
-            
+
             # Cleanup
             docker system prune -f
           EOF
@@ -277,7 +277,7 @@ jobs:
 
       - name: 📊 Database migration (if needed)
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.PRODUCTION_USER }}@${{ secrets.PRODUCTION_HOST }} << 'EOF'
+          ssh -o StrictHostKeyChecking=no -p ${{ secrets.VPS_SSH_PORT }} ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
             cd /opt/pavillon-les-lys-api
             docker-compose exec -T api yarn prisma migrate deploy
           EOF

@@ -19,6 +19,7 @@ import { Public } from "src/common/decorators/public.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { AuthenticationGuard } from "../../common/guards/authentication.guard";
 import { AuthorizationGuard } from "../../common/guards/authorization.guard";
+import { CreateStaffDto } from "./dto/create-staff.dto";
 import { CreateUserDto } from "./dto/create-user.dto";
 import { UpdateUserDto } from "./dto/update-user.dto";
 import { UserService } from "./user.service";
@@ -44,10 +45,10 @@ export class UserController {
   // Seuls les admins peuvent créer du staff
   @Roles(Role.ADMIN)
   @Post("staff")
-  async createStaff(@Body() createUserDto: CreateUserDto) {
+  async createStaff(@Body() createStaffDto: CreateStaffDto) {
     return this.userService.createStaff({
-      ...createUserDto,
-      role: createUserDto.role || Role.EVENT_MANAGER,
+      ...createStaffDto,
+      role: createStaffDto.role || Role.EVENT_MANAGER,
     });
   }
 
@@ -187,5 +188,20 @@ export class UserController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param("id", ParseUUIDPipe) id: string) {
     await this.userService.remove(id);
+  }
+
+  // Seuls les admins peuvent activer/désactiver un utilisateur
+  @Roles(Role.ADMIN)
+  @Patch(":id/toggle-status")
+  async toggleStatus(
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentUser() currentUser: any,
+  ) {
+    if (currentUser.id === id) {
+      throw new ForbiddenException(
+        "Vous ne pouvez pas désactiver votre propre compte",
+      );
+    }
+    return this.userService.toggleStatus(id);
   }
 }

@@ -6,13 +6,19 @@ import {
 } from "@nestjs/common";
 import { Role, User } from "@prisma/client";
 import * as bcrypt from "bcrypt";
+import * as crypto from "crypto";
 import { PrismaService } from "../../common/services/prisma.service";
+import { MailService } from "../../mail/mail.service";
+import { CreateStaffDto } from "./dto/create-staff.dto";
 import { CreateUserDto } from "./dto/create-user.dto";
 import { UpdateUserDto } from "./dto/update-user.dto";
 
 @Injectable()
 export class UserService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mailService: MailService,
+  ) {}
 
   async register(
     createUserDto: CreateUserDto,
@@ -47,6 +53,7 @@ export class UserService {
         lastName: true,
         phone: true,
         role: true,
+        isActive: true,
         isFirstLogin: true,
         lastLoginAt: true,
         resetToken: true,
@@ -62,11 +69,11 @@ export class UserService {
   }
 
   async createStaff(
-    createUserDto: CreateUserDto,
+    createStaffDto: CreateStaffDto,
   ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">> {
     // Vérifier si l'utilisateur existe déjà
     const existingUser = await this.prisma.user.findUnique({
-      where: { email: createUserDto.email },
+      where: { email: createStaffDto.email },
     });
 
     if (existingUser) {
@@ -75,26 +82,28 @@ export class UserService {
 
     // Valider que le rôle est ADMIN ou EVENT_MANAGER
     if (
-      !createUserDto.role ||
-      (createUserDto.role !== Role.ADMIN &&
-        createUserDto.role !== Role.EVENT_MANAGER)
+      !createStaffDto.role ||
+      (createStaffDto.role !== Role.ADMIN &&
+        createStaffDto.role !== Role.EVENT_MANAGER)
     ) {
       throw new BadRequestException("Le rôle doit être ADMIN ou EVENT_MANAGER");
     }
 
-    // Hasher le mot de passe
+    // Générer un mot de passe temporaire aléatoire sécurisé (jamais divulgué)
+    const tempPassword = crypto.randomBytes(32).toString("hex");
     const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(
-      createUserDto.password,
-      saltRounds,
-    );
+    const hashedPassword = await bcrypt.hash(tempPassword, saltRounds);
 
-    // Créer l'utilisateur staff
+    // Créer l'utilisateur staff avec isFirstLogin=true (valeur par défaut)
     const user = await this.prisma.user.create({
       data: {
-        ...createUserDto,
+        email: createStaffDto.email,
+        firstName: createStaffDto.firstName,
+        lastName: createStaffDto.lastName,
+        phone: createStaffDto.phone ?? "",
         password: hashedPassword,
-        role: createUserDto.role,
+        role: createStaffDto.role,
+        isFirstLogin: true,
       },
       select: {
         id: true,
@@ -103,6 +112,7 @@ export class UserService {
         lastName: true,
         phone: true,
         role: true,
+        isActive: true,
         isFirstLogin: true,
         lastLoginAt: true,
         resetToken: true,
@@ -113,6 +123,9 @@ export class UserService {
         updatedBy: true,
       },
     });
+
+    // Envoyer l'email de bienvenue (fire-and-forget)
+    this.mailService.sendStaffWelcomeEmail(user).catch(() => {});
 
     return user;
   }
@@ -134,6 +147,7 @@ export class UserService {
           lastName: true,
           phone: true,
           role: true,
+          isActive: true,
           isFirstLogin: true,
           lastLoginAt: true,
           resetToken: true,
@@ -168,6 +182,7 @@ export class UserService {
         lastName: true,
         phone: true,
         role: true,
+        isActive: true,
         isFirstLogin: true,
         lastLoginAt: true,
         resetToken: true,
@@ -237,6 +252,7 @@ export class UserService {
         lastName: true,
         phone: true,
         role: true,
+        isActive: true,
         isFirstLogin: true,
         lastLoginAt: true,
         resetToken: true,
@@ -350,6 +366,7 @@ export class UserService {
         lastName: true,
         phone: true,
         role: true,
+        isActive: true,
         isFirstLogin: true,
         lastLoginAt: true,
         resetToken: true,
@@ -369,6 +386,37 @@ export class UserService {
 
   async countUsers(): Promise<number> {
     return this.prisma.user.count();
+  }
+
+  async toggleStatus(
+    id: string,
+  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">> {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException(`Utilisateur avec l'ID ${id} non trouvé`);
+    }
+
+    return this.prisma.user.update({
+      where: { id },
+      data: { isActive: !user.isActive },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        role: true,
+        isActive: true,
+        isFirstLogin: true,
+        lastLoginAt: true,
+        resetToken: true,
+        resetTokenExpiry: true,
+        createdAt: true,
+        updatedAt: true,
+        createdBy: true,
+        updatedBy: true,
+      },
+    });
   }
 
   async validatePassword(
