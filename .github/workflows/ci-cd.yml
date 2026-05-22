@@ -116,7 +116,14 @@ jobs:
           ssh -p ${{ secrets.VPS_SSH_PORT }} ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
             "ENV_NAME='${ENV_NAME}' GHCR_PAT='${GHCR_PAT}' bash -s" << 'ENDSSH'
             set -e
-            cd ~/pavillon/${ENV_NAME}
+
+            # Chemin du dossier docker-compose selon l'environnement
+            case "${ENV_NAME}" in
+              dev)  DEPLOY_DIR="/home/Rico/pavillon-lys-api" ;;
+              prod) DEPLOY_DIR="/home/Rico/pavillon-lys-api-prod" ;;
+              *)    echo "❌ ENV_NAME inconnu: ${ENV_NAME}"; exit 1 ;;
+            esac
+            cd "${DEPLOY_DIR}"
 
             # Login GHCR (uniquement si PAT fourni — image privée)
             if [ -n "${GHCR_PAT}" ]; then
