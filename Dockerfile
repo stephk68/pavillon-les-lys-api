@@ -32,6 +32,12 @@ RUN npx prisma generate
 # Compiler l'application pour la production
 RUN yarn build
 
+# Créer les dossiers d'uploads (montés en volume au runtime)
+RUN mkdir -p /app/uploads/proofs \
+             /app/uploads/feedback \
+             /app/uploads/checklists \
+             /app/uploads/inventory
+
 # Créer un utilisateur non-root pour la sécurité
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nestjs -u 1001 -G nodejs

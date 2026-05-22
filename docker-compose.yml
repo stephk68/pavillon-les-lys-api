@@ -12,6 +12,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # Bind sur un port hôte différent du Postgres système (qui occupe déjà 5432)
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
     networks:
       - pavillon_network
     healthcheck:
