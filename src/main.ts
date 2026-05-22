@@ -9,43 +9,18 @@ async function bootstrap() {
   // ============================================================================
   // CORS CONFIGURATION - BLINDÉ POUR BACK OFFICE ET FRONT OFFICE
   // ============================================================================
-  const allowedOrigins = [
-    "http://localhost:3001", // Back Office (Dev)
-    "http://localhost:3002", // Front Office (Dev)
-    "http://localhost:3000", // API (Dev)
-    process.env.BACKOFFICE_URL, // Back Office (Prod)
-    process.env.FRONTOFFICE_URL, // Front Office (Prod)
-  ].filter(Boolean);
+  // const allowedOrigins = [
+  //   "http://localhost:3001", // Back Office (Dev)
+  //   "http://localhost:3002", // Front Office (Dev)
+  //   "http://localhost:3000", // API (Dev)
+  //   process.env.BACKOFFICE_URL, // Back Office (Prod)
+  //   process.env.FRONTOFFICE_URL, // Front Office (Prod)
+  // ].filter(Boolean);
 
-  logger.log(`🔒 CORS Whitelist: ${allowedOrigins.join(", ")}`);
+  logger.log("🔓 CORS: toutes les origines autorisées pour l'instant");
 
   app.enableCors({
-    origin: (origin, callback) => {
-      // ✅ Accepter les requêtes sans origin (Postman, mobile apps, curl, etc.)
-      if (!origin) {
-        logger.debug("✅ Requête sans origin (acceptée)");
-        return callback(null, true);
-      }
-
-      // ✅ En DEV : Accepter TOUS les localhost
-      if (
-        process.env.NODE_ENV === "development" &&
-        origin.includes("localhost")
-      ) {
-        logger.debug(`✅ DEV Mode - Origin localhost acceptée: ${origin}`);
-        return callback(null, true);
-      }
-
-      // ✅ Vérifier la whitelist EXACTE
-      if (allowedOrigins.includes(origin)) {
-        logger.debug(`✅ Origin whitelistée: ${origin}`);
-        return callback(null, true);
-      }
-
-      // ❌ Bloquer toutes les autres origines
-      logger.warn(`❌ CORS BLOQUÉ - Origin non autorisée: ${origin}`);
-      callback(new Error("Not allowed by CORS"));
-    },
+    origin: true,
     methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",
@@ -72,6 +47,6 @@ async function bootstrap() {
   const port = process.env.PORT ?? 4000;
   await app.listen(port);
   logger.log(`🚀 API démarrée sur le port ${port}`);
-  logger.log(`📋 Origines autorisées: ${allowedOrigins.join(", ")}`);
+  logger.log("📋 Origines autorisées: toutes");
 }
 bootstrap();
