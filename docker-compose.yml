@@ -4,7 +4,7 @@ services:
   # ============================================
   postgres:
     image: postgres:15-alpine
-    container_name: pavillon_db
+    container_name: pavillon_db_${ENV_SUFFIX}
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -24,14 +24,14 @@ services:
   # NestJS API
   # ============================================
   api:
-    image: ghcr.io/kysaymeric/pavillon-les-lys-api:latest
-    container_name: pavillon_api
+    image: ghcr.io/kysaymeric/pavillon-les-lys-api:${IMAGE_TAG:-latest}
+    container_name: pavillon_api_${ENV_SUFFIX}
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      NODE_ENV: production
+      NODE_ENV: ${NODE_ENV:-production}
       PORT: ${PORT:-4000}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       JWT_SECRET: ${JWT_SECRET}
@@ -65,11 +65,11 @@ services:
 
 volumes:
   postgres_data:
-    name: pavillon_postgres_data
+    name: pavillon_postgres_data_${ENV_SUFFIX}
   uploads_data:
-    name: pavillon_uploads_data
+    name: pavillon_uploads_data_${ENV_SUFFIX}
 
 networks:
   pavillon_network:
-    name: pavillon_network
+    name: pavillon_network_${ENV_SUFFIX}
     driver: bridge

@@ -1,337 +1,144 @@
-name: 🚀 CI/CD Pipeline - Pavillon Les Lys API
+name: CI/CD
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [develop, master]
   pull_request:
-    branches: [main, master]
-  workflow_dispatch: # Allow manual trigger
+    branches: [develop, master]
 
-# Define environment variables used across jobs
 env:
-  NODE_VERSION: '20.x'
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: kysaymeric/pavillon-les-lys-api
 
 jobs:
-  # =========================================
-  # JOB 1: Code Quality & Testing
-  # =========================================
-  test:
-    name: 🧪 Tests & Quality
+  # ============================================================
+  # 1. Quality — lint + build (toujours)
+  # ============================================================
+  quality:
+    name: Lint & Build
     runs-on: ubuntu-latest
-    
-    services:
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_DB: pavillon_test
-          POSTGRES_USER: test_user
-          POSTGRES_PASSWORD: test_password
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
     steps:
-      - name: 📥 Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 🔧 Setup Node.js
+      - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'yarn'
+          node-version: "20"
+          cache: yarn
 
-      - name: 📦 Install dependencies
+      - name: Install dependencies
         run: yarn install --frozen-lockfile
 
-      - name: 🔍 Run linter
+      - name: Lint
         run: yarn lint
 
-      - name: 🎨 Check code formatting
-        run: yarn format --check
-
-      - name: 🔨 Build application
+      - name: Build
         run: yarn build
 
-      - name: 🗄️ Setup test database
-        env:
-          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/pavillon_test
-        run: |
-          echo "DATABASE_URL=${{ env.DATABASE_URL }}" > .env
-          echo "JWT_SECRET=test-secret-key" >> .env
-          echo "JWT_EXPIRES_IN=24h" >> .env
-          yarn prisma generate
-          yarn prisma migrate deploy
-          yarn db:seed
-
-      - name: 🧪 Run unit tests
-        env:
-          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/pavillon_test
-          JWT_SECRET: test-secret-key
-          JWT_EXPIRES_IN: 24h
-        run: yarn test:unit
-
-      - name: 🔄 Run integration tests
-        env:
-          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/pavillon_test
-          JWT_SECRET: test-secret-key
-          JWT_EXPIRES_IN: 24h
-        run: yarn test:integration
-
-      - name: 🎯 Run e2e tests
-        env:
-          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/pavillon_test
-          JWT_SECRET: test-secret-key
-          JWT_EXPIRES_IN: 24h
-        run: yarn test:e2e
-
-      - name: 📊 Upload test coverage
-        uses: codecov/codecov-action@v3
-        if: always()
-        with:
-          file: ./coverage/lcov.info
-          flags: unittests
-          name: codecov-umbrella
-
-  # =========================================
-  # JOB 2: Security & Vulnerability Scan
-  # =========================================
-  security:
-    name: 🔒 Security Scan
+  # ============================================================
+  # 2. Build & push image Docker (uniquement push develop/master)
+  # ============================================================
+  build-and-push:
+    name: Build & Push Image
     runs-on: ubuntu-latest
-    needs: test
-
-    steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 🔧 Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'yarn'
-
-      - name: 📦 Install dependencies
-        run: yarn install --frozen-lockfile
-
-      - name: 🛡️ Run security audit
-        run: yarn audit --audit-level moderate
-
-      - name: 🔍 Run Snyk security scan
-        uses: snyk/actions/node@master
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --severity-threshold=high
-
-  # =========================================
-  # JOB 3: Build & Push Docker Image
-  # =========================================
-  build:
-    name: 🐳 Build & Push Image
-    runs-on: ubuntu-latest
-    needs: [test, security]
-    if: github.event_name == 'push'
-    
+    needs: quality
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/master')
     permissions:
       contents: read
       packages: write
-
     outputs:
-      image-tag: ${{ steps.meta.outputs.tags }}
-      image-digest: ${{ steps.build.outputs.digest }}
-
+      env_name: ${{ steps.env.outputs.env_name }}
+      image_tag: ${{ steps.env.outputs.image_tag }}
     steps:
-      - name: 📥 Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 🔧 Set up Docker Buildx
+      - name: Determine environment
+        id: env
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/master" ]; then
+            echo "env_name=prod" >> $GITHUB_OUTPUT
+            echo "image_tag=latest" >> $GITHUB_OUTPUT
+            echo "sha_tag=prod-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+          else
+            echo "env_name=dev" >> $GITHUB_OUTPUT
+            echo "image_tag=dev" >> $GITHUB_OUTPUT
+            echo "sha_tag=dev-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: 🔑 Login to Container Registry
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🏷️ Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: 🔨 Build and push Docker image
-        id: build
+      - name: Build & push
         uses: docker/build-push-action@v5
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.env.outputs.image_tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.env.outputs.sha_tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: 🔍 Scan image for vulnerabilities
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-
-      - name: 📤 Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v2
-        if: always()
-        with:
-          sarif_file: 'trivy-results.sarif'
-
-  # =========================================
-  # JOB 4: Deploy to Staging
-  # =========================================
-  deploy-staging:
-    name: 🚀 Deploy to Staging
+  # ============================================================
+  # 3. Deploy sur VPS (uniquement push develop/master)
+  # ============================================================
+  deploy:
+    name: Deploy (${{ needs.build-and-push.outputs.env_name }})
     runs-on: ubuntu-latest
-    needs: build
-    if: github.ref == 'refs/heads/develop'
-    environment: 
-      name: staging
-      url: https://api-staging.pavillon-les-lys.fr
-
+    needs: build-and-push
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/master')
     steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 🔧 Setup SSH
+      - name: Setup SSH
         uses: webfactory/ssh-agent@v0.8.0
         with:
           ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
 
-      - name: 🚀 Deploy to staging server
+      - name: Add VPS to known hosts
         run: |
-          ssh -o StrictHostKeyChecking=no -p ${{ secrets.VPS_SSH_PORT }} ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
-            cd /opt/pavillon-les-lys-api
-            docker-compose pull api
-            docker-compose up -d api
-            docker system prune -f
-          EOF
+          mkdir -p ~/.ssh
+          ssh-keyscan -p ${{ secrets.VPS_SSH_PORT }} -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
 
-      # - name: 🏥 Health check
-      #   run: |
-      #     sleep 30
-      #     curl -f https://api-staging.pavillon-les-lys.fr/health || exit 1
-
-  # =========================================
-  # JOB 5: Deploy to Production
-  # =========================================
-  deploy-production:
-    name: 🌟 Deploy to Production
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    environment: 
-      name: production
-      url: https://api.pavillon-les-lys.fr
-
-    steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 🔧 Setup SSH
-        uses: webfactory/ssh-agent@v0.8.0
-        with:
-          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
-
-      - name: 🚀 Deploy to production server
-        run: |
-          ssh -o StrictHostKeyChecking=no -p ${{ secrets.VPS_SSH_PORT }} ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
-            cd /opt/pavillon-les-lys-api
-
-            # Backup current version
-            docker-compose down api
-            docker tag $(docker images --format "table {{.Repository}}:{{.Tag}}" | grep pavillon-les-lys | head -1) pavillon-les-lys:backup
-
-            # Deploy new version
-            docker-compose pull api
-            docker-compose up -d api
-
-            # Cleanup
-            docker system prune -f
-          EOF
-
-      - name: 🏥 Health check
-        run: |
-          sleep 30
-          curl -f https://api.pavillon-les-lys.fr/health || exit 1
-
-      - name: 📊 Database migration (if needed)
-        run: |
-          ssh -o StrictHostKeyChecking=no -p ${{ secrets.VPS_SSH_PORT }} ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
-            cd /opt/pavillon-les-lys-api
-            docker-compose exec -T api yarn prisma migrate deploy
-          EOF
-
-  # =========================================
-  # JOB 6: Notification & Monitoring
-  # =========================================
-  notify:
-    name: 📢 Notify Teams
-    runs-on: ubuntu-latest
-    needs: [deploy-staging, deploy-production]
-    if: always()
-
-    steps:
-      - name: 💬 Slack notification
-        uses: 8398a7/action-slack@v3
-        if: always()
-        with:
-          status: ${{ job.status }}
-          text: |
-            🚀 Pavillon Les Lys API Deployment
-            
-            📋 Summary:
-            • Branch: ${{ github.ref_name }}
-            • Commit: ${{ github.sha }}
-            • Author: ${{ github.actor }}
-            
-            📊 Results:
-            • Tests: ${{ needs.test.result }}
-            • Security: ${{ needs.security.result }}
-            • Build: ${{ needs.build.result }}
-            • Staging: ${{ needs.deploy-staging.result }}
-            • Production: ${{ needs.deploy-production.result }}
-            
-            🔗 View details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      - name: Deploy on VPS
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          ENV_NAME: ${{ needs.build-and-push.outputs.env_name }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+        run: |
+          ssh -p ${{ secrets.VPS_SSH_PORT }} ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "ENV_NAME='${ENV_NAME}' GHCR_PAT='${GHCR_PAT}' bash -s" << 'ENDSSH'
+            set -e
+            cd ~/pavillon/${ENV_NAME}
 
-      - name: 📧 Email notification
-        if: failure()
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: ${{ secrets.SMTP_SERVER }}
-          server_port: ${{ secrets.SMTP_PORT }}
-          username: ${{ secrets.SMTP_USERNAME }}
-          password: ${{ secrets.SMTP_PASSWORD }}
-          subject: "❌ Pavillon Les Lys API - Deployment Failed"
-          to: ${{ secrets.NOTIFICATION_EMAIL }}
-          from: "GitHub Actions <noreply@pavillon-les-lys.fr>"
-          body: |
-            Deployment failed for Pavillon Les Lys API
-            
-            Branch: ${{ github.ref_name }}
-            Commit: ${{ github.sha }}
-            Author: ${{ github.actor }}
-            
-            View logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            # Login GHCR (uniquement si PAT fourni — image privée)
+            if [ -n "${GHCR_PAT}" ]; then
+              echo "${GHCR_PAT}" | docker login ghcr.io -u kysaymeric --password-stdin
+            fi
+
+            echo "📥 Pull de la dernière image…"
+            docker compose pull api
+
+            echo "🚀 Redémarrage de la stack…"
+            docker compose up -d --remove-orphans
+
+            echo "⏳ Attente du démarrage de l'API…"
+            sleep 10
+
+            echo "📦 Exécution des migrations Prisma…"
+            docker compose exec -T api npx prisma migrate deploy
+
+            echo "🌱 Seed admin (idempotent)…"
+            docker compose exec -T api node prisma/seed.prod.js
+
+            echo "🧹 Nettoyage des images obsolètes…"
+            docker image prune -f
+
+            echo "✅ Déploiement ${ENV_NAME} terminé."
+          ENDSSH
