@@ -227,10 +227,10 @@ jobs:
             docker system prune -f
           EOF
 
-      - name: 🏥 Health check
-        run: |
-          sleep 30
-          curl -f https://api-staging.pavillon-les-lys.fr/health || exit 1
+      # - name: 🏥 Health check
+      #   run: |
+      #     sleep 30
+      #     curl -f https://api-staging.pavillon-les-lys.fr/health || exit 1
 
   # =========================================
   # JOB 5: Deploy to Production

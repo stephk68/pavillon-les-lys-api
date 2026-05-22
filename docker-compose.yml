@@ -1,0 +1,75 @@
+services:
+  # ============================================
+  # PostgreSQL - Base de données
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: pavillon_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - pavillon_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # NestJS API
+  # ============================================
+  api:
+    image: ghcr.io/kysaymeric/pavillon-les-lys-api:latest
+    container_name: pavillon_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: ${PORT:-4000}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-${JWT_SECRET}}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-${JWT_SECRET}}
+      JWT_ACCESS_EXPIRATION_MINUTES: ${JWT_ACCESS_EXPIRATION_MINUTES:-15}
+      JWT_REFRESH_EXPIRATION_DAYS: ${JWT_REFRESH_EXPIRATION_DAYS:-30}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
+      MAIL_HOST: ${MAIL_HOST}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USER: ${MAIL_USER}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
+      MAIL_FROM: ${MAIL_FROM}
+      FRONTEND_URL: ${FRONTEND_URL:-https://www.pavillonleslys.com}
+      BACKOFFICE_URL: ${BACKOFFICE_URL:-https://backoffice.pavillonleslys.com}
+      FRONTOFFICE_URL: ${FRONTOFFICE_URL:-https://www.pavillonleslys.com}
+      BCRYPT_ROUNDS: ${BCRYPT_SALT_ROUNDS:-12}
+      CAUTION_AMOUNT: ${CAUTION_AMOUNT:-100000}
+    volumes:
+      - uploads_data:/app/uploads
+    ports:
+      - "${PORT:-4000}:${PORT:-4000}"
+    networks:
+      - pavillon_network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${PORT:-4000}/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_data:
+    name: pavillon_postgres_data
+  uploads_data:
+    name: pavillon_uploads_data
+
+networks:
+  pavillon_network:
+    name: pavillon_network
+    driver: bridge

@@ -33,6 +33,7 @@
     "prisma:deploy": "npx prisma migrate deploy",
     "prisma:studio": "npx prisma studio",
     "seed": "node prisma/seed.js",
+    "seed:prod": "node prisma/seed.prod.js",
     "db:seed": "npx prisma db seed"
   },
   "dependencies": {
@@ -89,7 +90,8 @@
     "ts-loader": "^9.4.3",
     "ts-node": "^10.9.1",
     "tsconfig-paths": "^4.2.0",
-    "typescript": "^5.1.3"
+    "typescript": "^5.1.3",
+    "typescript-eslint": "^8.59.4"
   },
   "jest": {
     "moduleFileExtensions": [
