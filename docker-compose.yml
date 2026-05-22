@@ -24,7 +24,7 @@ services:
   # NestJS API
   # ============================================
   api:
-    image: ghcr.io/stephk68/pavillon-les-lys:${IMAGE_TAG:-latest}
+    image: kysaymeric/pavillon-les-lys:${IMAGE_TAG:-latest}
     container_name: pavillon_api_${ENV_SUFFIX}
     restart: unless-stopped
     depends_on:
