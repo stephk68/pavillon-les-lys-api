@@ -7,6 +7,34 @@ export class MailService {
 
   constructor(private readonly mailerService: MailerService) {}
 
+  /** URL publique du frontoffice (espace client). */
+  private get frontofficeUrl(): string {
+    return process.env.FRONTOFFICE_URL ?? process.env.FRONTEND_URL ?? "";
+  }
+
+  /** URL du backoffice (espace staff). */
+  private get backofficeUrl(): string {
+    return process.env.BACKOFFICE_URL ?? this.frontofficeUrl;
+  }
+
+  /**
+   * Liens d'authentification dépendant de la provenance, déterminée par le
+   * rôle du destinataire : un CLIENT agit via le frontoffice, un membre du
+   * staff (ADMIN / EVENT_MANAGER) via le backoffice. Le backoffice n'utilise
+   * pas le préfixe `/auth` contrairement au frontoffice.
+   */
+  private resolveAuthUrls(role?: string) {
+    const isStaff = role === "ADMIN" || role === "EVENT_MANAGER";
+    const base = isStaff ? this.backofficeUrl : this.frontofficeUrl;
+    const prefix = isStaff ? "" : "/auth";
+    return {
+      base,
+      loginUrl: `${base}${prefix}/login`,
+      resetUrl: (token: string) =>
+        `${base}${prefix}/reset-password?token=${token}`,
+    };
+  }
+
   /**
    * Envoie un email de contrat au client (remplace l'ancien sendQuote)
    */
@@ -67,7 +95,7 @@ export class MailService {
             totalTTC: eventFolder.totalTTC?.toFixed(2) || "0.00",
             notes: eventFolder.notes || "",
           },
-          dashboardUrl: `${process.env.FRONTEND_URL}/dashboard/event-folders/${eventFolder.id}`,
+          dashboardUrl: `${this.frontofficeUrl}/espace/${eventFolder.id}`,
         },
         attachments,
       });
@@ -112,7 +140,7 @@ export class MailService {
               : "Date non définie",
             attendees: eventFolder.attendees,
           },
-          dashboardUrl: `${process.env.FRONTEND_URL}/dashboard/event-folders/${eventFolder.id}`,
+          dashboardUrl: `${this.frontofficeUrl}/espace/${eventFolder.id}`,
         },
       });
 
@@ -149,7 +177,7 @@ export class MailService {
             }),
             method: payment.paymentMethod,
           },
-          dashboardUrl: `${process.env.FRONTEND_URL}/mon-espace/paiements`,
+          dashboardUrl: `${this.frontofficeUrl}/espace`,
         },
       });
 
@@ -199,7 +227,7 @@ export class MailService {
               : "Date non définie",
             attendees: eventFolder.attendees,
           },
-          dashboardUrl: `${process.env.FRONTEND_URL}/dashboard/event-folders/${eventFolder.id}`,
+          dashboardUrl: `${this.frontofficeUrl}/espace/${eventFolder.id}`,
         },
       });
 
@@ -240,7 +268,7 @@ export class MailService {
                 )
               : "Date non définie",
           },
-          feedbackUrl: `${process.env.FRONTEND_URL}/mon-espace/feedback/new?eventFolderId=${eventFolder.id}`,
+          feedbackUrl: `${this.frontofficeUrl}/espace/${eventFolder.id}`,
         },
       });
 
@@ -269,7 +297,7 @@ export class MailService {
         context: {
           firstName,
           lastName,
-          dashboardUrl: `${process.env.FRONTEND_URL}/mon-espace`,
+          dashboardUrl: `${this.frontofficeUrl}/espace`,
         },
       });
 
@@ -299,7 +327,7 @@ export class MailService {
         context: {
           firstName,
           lastName,
-          dashboardUrl: `${process.env.BACKOFFICE_URL ?? process.env.FRONTEND_URL}/login`,
+          dashboardUrl: `${this.backofficeUrl}/login`,
         },
       });
 
@@ -325,7 +353,7 @@ export class MailService {
         context: {
           firstName,
           lastName,
-          resetUrl: `${process.env.FRONTEND_URL}/auth/reset-password?token=${resetToken}`,
+          resetUrl: this.resolveAuthUrls(user?.role).resetUrl(resetToken),
           expirationTime: "1 heure",
         },
       });
@@ -402,6 +430,7 @@ export class MailService {
     email: string;
     firstName: string;
     lastName: string;
+    role?: string;
   }): Promise<void> {
     const { email, firstName, lastName } = user;
 
@@ -420,7 +449,7 @@ export class MailService {
             hour: "2-digit",
             minute: "2-digit",
           }),
-          loginUrl: `${process.env.FRONTEND_URL}/auth/login`,
+          loginUrl: this.resolveAuthUrls(user.role).loginUrl,
         },
       });
 
