@@ -13,8 +13,8 @@ import { MailService } from "./mail.service";
       useFactory: async (configService: ConfigService) => ({
         transport: {
           host: configService.get("MAIL_HOST"),
-          port: configService.get("MAIL_PORT"),
-          secure: false, // true for 465, false for other ports
+          port: Number(configService.get("MAIL_PORT")),
+          secure: Number(configService.get("MAIL_PORT")) === 465, // true for 465 (SSL/TLS), false otherwise
           auth: {
             user: configService.get("MAIL_USER"),
             pass: configService.get("MAIL_PASSWORD"),
