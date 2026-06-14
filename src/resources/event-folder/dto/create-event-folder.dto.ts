@@ -22,9 +22,13 @@ export class EventFolderItemDto {
   @Min(1)
   quantity: number;
 
+  // Prix unitaire optionnel : la tarification du devis est désormais un
+  // montant global (totalAmount) + remise. Les lignes ne portent que
+  // description + quantité.
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  unitPrice: number;
+  unitPrice?: number;
 }
 
 export class EventScheduleDto {
@@ -93,6 +97,21 @@ export class CreateEventFolderDto {
   @IsOptional()
   @IsDateString()
   validUntil?: string;
+
+  // Tarification globale : montant total HT négocié + remise.
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  totalAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  discountAmount?: number;
+
+  @IsOptional()
+  @IsString()
+  discountReason?: string;
 
   // New Pricing Fields
   @IsOptional()

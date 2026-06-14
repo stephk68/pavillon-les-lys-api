@@ -455,6 +455,37 @@ async function main() {
   console.log("✅ Feedback créé");
 
   // ──────────────────────────────────────────
+  // 8. QUOTE DEFAULT ITEMS (libellés par défaut du devis)
+  // ──────────────────────────────────────────
+  const defaultQuoteLabels = [
+    "Salle climatisée",
+    "Sono + DJ",
+    "Chaises",
+    "Tables rondes de 10 personnes + nappes",
+    "Table ronde gâteau",
+    "Tables rectangulaires + nappes",
+    "Assiettes plates",
+    "Assiettes creuses",
+    "Assiette dessert",
+    "Verre à eau",
+    "Verre à vin",
+    "Verre à champagne",
+    "Couverts VIP dorés (cuillères, fourchettes, couteaux)",
+    "Futs à boissons",
+    "Serveurs",
+  ];
+  const existingDefaults = await prisma.quoteDefaultItem.count();
+  if (existingDefaults === 0) {
+    await prisma.quoteDefaultItem.createMany({
+      data: defaultQuoteLabels.map((label, i) => ({
+        label,
+        displayOrder: i + 1,
+      })),
+    });
+    console.log("✅ Éléments de devis par défaut créés");
+  }
+
+  // ──────────────────────────────────────────
   // SUMMARY
   // ──────────────────────────────────────────
   console.log("\n🎉 Seed terminé avec succès !");

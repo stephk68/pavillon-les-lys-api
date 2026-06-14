@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -194,22 +193,10 @@ export class EventFolderController {
 
   // ==================== CLIENT ACTIONS ====================
 
-  @Post(":id/accept-quote")
-  async acceptQuote(@Param("id") id: string, @CurrentUser() user: any) {
-    const folder = await this.eventFolderService.findOne(id);
-    if (user.role === Role.CLIENT && folder.userId !== user.id) {
-      throw new ForbiddenException("Accès refusé");
-    }
-    if (folder.status !== "QUOTED") {
-      throw new BadRequestException(
-        "Le devis ne peut être accepté que lorsque le statut est QUOTED",
-      );
-    }
-    return this.eventFolderService.transitionStatus(
-      id,
-      EventStatus.BOOKED,
-      user.id,
-    );
+  @Post(":id/send-contract")
+  @Roles(Role.ADMIN, Role.EVENT_MANAGER)
+  sendContract(@Param("id") id: string) {
+    return this.eventFolderService.sendContractEmail(id);
   }
 
   @Get(":id/quote-pdf")
@@ -222,30 +209,12 @@ export class EventFolderController {
     if (user.role === Role.CLIENT && folder.userId !== user.id) {
       throw new ForbiddenException("Accès refusé");
     }
-    if (!folder.items || folder.items.length === 0) {
-      throw new BadRequestException("Aucun item dans le devis");
-    }
 
-    const buffer = await this.pdfService.generateQuotePdf({
-      number: folder.folderNumber,
-      date: new Date(folder.createdAt).toLocaleDateString("fr-FR"),
-      validUntil: folder.validUntil
-        ? new Date(folder.validUntil).toLocaleDateString("fr-FR")
-        : "Non spécifié",
-      client: {
-        name: `${folder.user.firstName} ${folder.user.lastName}`,
-        email: folder.user.email,
-        phone: folder.user.phone || undefined,
-      },
-      items: folder.items.map((item) => ({
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: Number(item.unitPrice),
-        totalPrice: Number(item.totalPrice),
-      })),
-      totalHT: Number(folder.totalHT),
-      vatRate: Number(folder.vatRate),
-      totalTTC: Number(folder.totalTTC),
+    // Le backoffice (admin/event-manager) télécharge la version complète avec
+    // la page de signature ; le client reçoit le devis sans page signature.
+    const includeSignature = user.role !== Role.CLIENT;
+    const buffer = await this.eventFolderService.buildQuotePdfBuffer(folder, {
+      includeSignature,
     });
 
     res.set({

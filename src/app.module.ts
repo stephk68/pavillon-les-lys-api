@@ -13,6 +13,7 @@ import { EventFolderModule } from "./resources/event-folder/event-folder.module"
 import { FeedbackModule } from "./resources/feedback/feedback.module";
 import { InventoryModule } from "./resources/inventory/inventory.module";
 import { PaymentModule } from "./resources/payment/payment.module";
+import { QuoteDefaultItemModule } from "./resources/quote-default-item/quote-default-item.module";
 import { UserModule } from "./resources/user/user.module";
 import { SchedulerModule } from "./scheduler/scheduler.module";
 
@@ -36,6 +37,7 @@ import { SchedulerModule } from "./scheduler/scheduler.module";
     InventoryModule,
     SchedulerModule,
     AuditLogModule,
+    QuoteDefaultItemModule,
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],

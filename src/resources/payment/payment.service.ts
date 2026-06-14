@@ -4,11 +4,12 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
-import { PaymentStatus, PaymentType, Prisma } from "@prisma/client";
+import { EventStatus, PaymentStatus, PaymentType, Prisma } from "@prisma/client";
 import { PdfService } from "../../common/services/pdf.service";
 import { PrismaService } from "../../common/services/prisma.service";
 import { MailService } from "../../mail/mail.service";
 import { AuditLogService } from "../audit-log/audit-log.service";
+import { EventFolderService } from "../event-folder/event-folder.service";
 import { CreatePaymentDto, UpdatePaymentDto } from "./dto/payment.dto";
 
 @Injectable()
@@ -20,6 +21,7 @@ export class PaymentService {
     private readonly pdfService: PdfService,
     private readonly auditLogService: AuditLogService,
     private readonly mailService: MailService,
+    private readonly eventFolderService: EventFolderService,
   ) {}
 
   // ==================== CRUD ====================
@@ -237,7 +239,30 @@ export class PaymentService {
           paidAt: new Date(),
           paymentMethod: "Virement",
         })
-        .catch(() => {});
+        .catch((e) =>
+          this.logger.error(
+            `Envoi confirmation paiement échoué (${id}): ${e.message}`,
+          ),
+        );
+    }
+
+    // Passage automatique en BOOKED lorsque l'acompte est validé sur un
+    // dossier en QUOTED. transitionStatus re-valide l'acompte (≥ 50% PAID)
+    // et envoie l'email de confirmation de réservation (avec PDF devis).
+    if (
+      payment.type === PaymentType.ACOMPTE &&
+      updated.eventFolder.status === EventStatus.QUOTED
+    ) {
+      try {
+        await this.eventFolderService.transitionStatus(
+          updated.eventFolder.id,
+          EventStatus.BOOKED,
+        );
+      } catch (e) {
+        this.logger.error(
+          `Passage auto en BOOKED échoué pour le dossier ${updated.eventFolder.folderNumber}: ${e.message}`,
+        );
+      }
     }
 
     return updated;

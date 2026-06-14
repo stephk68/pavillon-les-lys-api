@@ -7,11 +7,13 @@ import {
 } from "@nestjs/common";
 import {
   EventStatus,
+  EventType,
   PaymentStatus,
   PaymentType,
   Prisma,
 } from "@prisma/client";
 import * as bcrypt from "bcrypt";
+import { PdfService } from "../../common/services/pdf.service";
 import { PrismaService } from "../../common/services/prisma.service";
 import { MailService } from "../../mail/mail.service";
 import { AuditLogService } from "../audit-log/audit-log.service";
@@ -19,6 +21,14 @@ import { CreateEventFolderDto } from "./dto/create-event-folder.dto";
 import { CreateReservationRequestDto } from "./dto/create-reservation-request.dto";
 import { AddEquipmentDto, UpdateEquipmentDto } from "./dto/equipment.dto";
 import { UpdateEventFolderDto } from "./dto/update-event-folder.dto";
+
+// Libellés lisibles des types d'événement (pour le PDF du devis)
+const EVENT_TYPE_LABELS: Record<EventType, string> = {
+  MARIAGE: "Mariage",
+  ANNIVERSAIRE: "Anniversaire",
+  PROFESSIONNEL: "Professionnel",
+  AUTRE: "Événement",
+};
 
 // Default checklist items generated for every new event folder
 const DEFAULT_CHECKLIST_ITEMS = [
@@ -67,6 +77,7 @@ export class EventFolderService {
     private readonly prisma: PrismaService,
     private readonly auditLogService: AuditLogService,
     private readonly mailService: MailService,
+    private readonly pdfService: PdfService,
   ) {}
 
   // ==================== HELPERS ====================
@@ -96,17 +107,30 @@ export class EventFolderService {
     return `EVT-${year}-${String(maxSeq + 1).padStart(4, "0")}`;
   }
 
-  private calculateTotals(items: { quantity: number; unitPrice: number }[]) {
-    const totalHT = items.reduce(
-      (sum, item) => sum + item.quantity * item.unitPrice,
+  /**
+   * Calcule les totaux du devis. La tarification est un montant global HT
+   * négocié (`totalAmount`) auquel on retranche une remise. Si `totalAmount`
+   * n'est pas fourni, on retombe sur la somme des lignes (rétro-compat).
+   * La TVA reste désactivée (0).
+   */
+  private calculateTotals(
+    items: { quantity: number; unitPrice?: number }[],
+    opts?: { totalAmount?: number; discountAmount?: number },
+  ) {
+    const lineSum = items.reduce(
+      (sum, item) => sum + item.quantity * (item.unitPrice ?? 0),
       0,
     );
+    const totalHT =
+      opts?.totalAmount !== undefined ? opts.totalAmount : lineSum;
+    const discountAmount = opts?.discountAmount ?? 0;
     const vatRate = 0; // TVA désactivée
-    const totalTTC = totalHT + totalHT * (vatRate / 100);
+    const totalTTC = Math.max(0, totalHT - discountAmount);
     return {
       totalHT: new Prisma.Decimal(totalHT),
       vatRate: new Prisma.Decimal(vatRate),
       totalTTC: new Prisma.Decimal(totalTTC),
+      discountAmount: new Prisma.Decimal(discountAmount),
     };
   }
 
@@ -205,10 +229,14 @@ export class EventFolderService {
         );
       }
 
-      // 2) Calculate totals from items
+      // 2) Calculate totals (montant global + remise)
       const items = dto.items || [];
       const totals = this.calculateTotals(
         items.map((i) => ({ quantity: i.quantity, unitPrice: i.unitPrice })),
+        {
+          totalAmount: dto.totalAmount,
+          discountAmount: dto.discountAmount,
+        },
       );
 
       // 3) Create the event folder
@@ -238,6 +266,8 @@ export class EventFolderService {
           totalHT: totals.totalHT,
           vatRate: totals.vatRate,
           totalTTC: totals.totalTTC,
+          discountAmount: totals.discountAmount,
+          discountReason: dto.discountReason ?? null,
           validUntil: dto.validUntil ? new Date(dto.validUntil) : null,
           createdBy,
           // Create items
@@ -247,9 +277,9 @@ export class EventFolderService {
                   create: items.map((item) => ({
                     description: item.description,
                     quantity: item.quantity,
-                    unitPrice: new Prisma.Decimal(item.unitPrice),
+                    unitPrice: new Prisma.Decimal(item.unitPrice ?? 0),
                     totalPrice: new Prisma.Decimal(
-                      item.quantity * item.unitPrice,
+                      item.quantity * (item.unitPrice ?? 0),
                     ),
                   })),
                 }
@@ -448,27 +478,42 @@ export class EventFolderService {
       ...(dto.remainingBalance !== undefined && {
         remainingBalance: dto.remainingBalance,
       }),
+      ...(dto.discountReason !== undefined && {
+        discountReason: dto.discountReason,
+      }),
       version: { increment: 1 },
       updatedBy,
     };
 
+    // Recalcul des totaux si les lignes OU la tarification globale changent.
+    const pricingChanged =
+      dto.items !== undefined ||
+      dto.totalAmount !== undefined ||
+      dto.discountAmount !== undefined;
+
+    if (pricingChanged) {
+      const itemsForSum = (dto.items ?? folder.items).map((i) => ({
+        quantity: i.quantity,
+        unitPrice: Number((i as { unitPrice?: number | string }).unitPrice ?? 0),
+      }));
+      const totals = this.calculateTotals(itemsForSum, {
+        totalAmount:
+          dto.totalAmount !== undefined
+            ? dto.totalAmount
+            : Number(folder.totalHT),
+        discountAmount:
+          dto.discountAmount !== undefined
+            ? dto.discountAmount
+            : Number(folder.discountAmount),
+      });
+      updateData.totalHT = totals.totalHT;
+      updateData.vatRate = totals.vatRate;
+      updateData.totalTTC = totals.totalTTC;
+      updateData.discountAmount = totals.discountAmount;
+    }
+
     // If items or schedules provided, handle in transaction
     if (dto.items || dto.schedules) {
-      const totals = dto.items
-        ? this.calculateTotals(
-            dto.items.map((i) => ({
-              quantity: i.quantity,
-              unitPrice: i.unitPrice,
-            })),
-          )
-        : undefined;
-
-      if (totals) {
-        updateData.totalHT = totals.totalHT;
-        updateData.vatRate = totals.vatRate;
-        updateData.totalTTC = totals.totalTTC;
-      }
-
       return this.prisma.$transaction(async (tx) => {
         // Recreate items if provided
         if (dto.items) {
@@ -490,9 +535,9 @@ export class EventFolderService {
                 create: dto.items.map((item) => ({
                   description: item.description,
                   quantity: item.quantity,
-                  unitPrice: new Prisma.Decimal(item.unitPrice),
+                  unitPrice: new Prisma.Decimal(item.unitPrice ?? 0),
                   totalPrice: new Prisma.Decimal(
-                    item.quantity * item.unitPrice,
+                    item.quantity * (item.unitPrice ?? 0),
                   ),
                 })),
               },
@@ -545,6 +590,113 @@ export class EventFolderService {
     }
 
     await this.prisma.eventFolder.delete({ where: { id } });
+  }
+
+  // ==================== QUOTE / PDF / EMAIL ====================
+
+  /**
+   * Génère le PDF du devis pour un dossier (réutilisé par le controller,
+   * les emails de transition et l'endpoint de renvoi de contrat).
+   * `includeSignature` : version backoffice complète (avec page signature) ;
+   * par défaut false → version cliente (sans signature).
+   */
+  async buildQuotePdfBuffer(
+    folder: {
+      folderNumber: string;
+      eventType: EventType;
+      attendees: number;
+      createdAt: Date;
+      discountAmount?: Prisma.Decimal | number | null;
+      discountReason?: string | null;
+      cautionAmount?: Prisma.Decimal | number | null;
+      user?: {
+        firstName: string;
+        lastName: string;
+        phone?: string | null;
+      } | null;
+      schedules?: Array<{ date: Date | string }>;
+      items?: Array<{ description: string; quantity: number }>;
+      totalHT: Prisma.Decimal | number;
+      totalTTC: Prisma.Decimal | number;
+    },
+    opts?: { includeSignature?: boolean },
+  ): Promise<Buffer> {
+    if (!folder.user) {
+      throw new BadRequestException(
+        "Le dossier n'a pas de client associé pour générer le devis",
+      );
+    }
+    if (!folder.items || folder.items.length === 0) {
+      throw new BadRequestException("Aucun item dans le devis");
+    }
+
+    const eventDate = folder.schedules?.[0]?.date
+      ? new Date(folder.schedules[0].date)
+      : new Date(folder.createdAt);
+    const eventPeriod = eventDate
+      .toLocaleDateString("fr-FR", { month: "long", year: "numeric" })
+      .toUpperCase();
+
+    const cautionAmount = Number(
+      folder.cautionAmount || process.env.CAUTION_AMOUNT || 200000,
+    );
+
+    return this.pdfService.generateQuotePdf({
+      number: folder.folderNumber,
+      date: new Date(folder.createdAt).toLocaleDateString("fr-FR"),
+      eventTypeLabel: EVENT_TYPE_LABELS[folder.eventType] || "Événement",
+      eventPeriod,
+      attendees: folder.attendees,
+      client: {
+        name: `${folder.user.firstName} ${folder.user.lastName}`,
+        phone: folder.user.phone || undefined,
+      },
+      items: folder.items.map((item) => ({
+        description: item.description,
+        quantity: item.quantity,
+      })),
+      subtotal: Number(folder.totalHT),
+      discountAmount: Number(folder.discountAmount || 0),
+      discountReason: folder.discountReason || undefined,
+      total: Number(folder.totalTTC),
+      cautionAmount,
+      includeSignature: opts?.includeSignature ?? false,
+    });
+  }
+
+  /**
+   * (Re)envoi du contrat par email au client, avec le PDF du devis en pièce
+   * jointe. Utilisé par l'endpoint POST /event-folders/:id/send-contract.
+   * Les erreurs sont remontées (pas de fire-and-forget) pour affichage côté
+   * backoffice.
+   */
+  async sendContractEmail(id: string) {
+    const folder = await this.findOne(id);
+
+    if (!folder.user) {
+      throw new BadRequestException("Le dossier n'a pas de client associé");
+    }
+
+    const pdfBuffer = await this.buildQuotePdfBuffer(folder);
+
+    await this.mailService.sendContract(
+      {
+        email: folder.user.email,
+        firstName: folder.user.firstName,
+        lastName: folder.user.lastName,
+      },
+      folder,
+      pdfBuffer,
+    );
+
+    if (!folder.contractSentAt) {
+      await this.prisma.eventFolder.update({
+        where: { id },
+        data: { contractSentAt: new Date() },
+      });
+    }
+
+    return { success: true, message: "Contrat envoyé au client" };
   }
 
   // ==================== STATUS MACHINE ====================
@@ -703,30 +855,49 @@ export class EventFolderService {
     // Envoi d'emails selon la transition (fire-and-forget)
     const user = updated.user || folder.user;
     if (user) {
+      const recipient = {
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      };
       switch (targetStatus) {
         case EventStatus.QUOTED:
-          this.mailService
-            .sendContract(
-              {
-                email: user.email,
-                firstName: user.firstName,
-                lastName: user.lastName,
-              },
-              updated,
+          this.buildQuotePdfBuffer(updated)
+            .catch((e) => {
+              this.logger.error(
+                `Génération PDF devis échouée (contrat ${folder.folderNumber}): ${e.message}`,
+              );
+              return undefined;
+            })
+            .then((pdfBuffer) =>
+              this.mailService.sendContract(recipient, updated, pdfBuffer),
             )
-            .catch(() => {});
+            .catch((e) =>
+              this.logger.error(
+                `Envoi contrat échoué (${folder.folderNumber}): ${e.message}`,
+              ),
+            );
           break;
         case EventStatus.BOOKED:
-          this.mailService
-            .sendBookingConfirmation(
-              {
-                email: user.email,
-                firstName: user.firstName,
-                lastName: user.lastName,
-              },
-              updated,
+          this.buildQuotePdfBuffer(updated)
+            .catch((e) => {
+              this.logger.error(
+                `Génération PDF devis échouée (confirmation ${folder.folderNumber}): ${e.message}`,
+              );
+              return undefined;
+            })
+            .then((pdfBuffer) =>
+              this.mailService.sendBookingConfirmation(
+                recipient,
+                updated,
+                pdfBuffer,
+              ),
             )
-            .catch(() => {});
+            .catch((e) =>
+              this.logger.error(
+                `Envoi confirmation échoué (${folder.folderNumber}): ${e.message}`,
+              ),
+            );
           break;
         case EventStatus.COMPLETED:
           this.mailService
@@ -738,7 +909,11 @@ export class EventFolderService {
               },
               updated,
             )
-            .catch(() => {});
+            .catch((e) =>
+              this.logger.error(
+                `Envoi demande d'avis échoué (${folder.folderNumber}): ${e.message}`,
+              ),
+            );
           break;
       }
     }
@@ -824,7 +999,7 @@ export class EventFolderService {
 
     const acompte = totalTTC * 0.5;
     const solde = totalTTC - acompte;
-    const caution = Number(process.env.CAUTION_AMOUNT || 100000); // Default 100,000 XOF
+    const caution = Number(process.env.CAUTION_AMOUNT || 200000); // Défaut 200 000 XOF (cf. devis/contrat)
 
     if (!folder.schedules || folder.schedules.length === 0) {
       throw new BadRequestException("Le dossier n'a pas d'horaires définis.");

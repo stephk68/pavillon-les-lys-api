@@ -49,7 +49,7 @@ export class MailService {
       const attachments = pdfBuffer
         ? [
             {
-              filename: `Contrat-${eventFolder.folderNumber}.pdf`,
+              filename: `Devis-${eventFolder.folderNumber}.pdf`,
               content: pdfBuffer,
               contentType: "application/pdf",
             },
@@ -113,14 +113,26 @@ export class MailService {
   async sendBookingConfirmation(
     user: { email: string; firstName: string; lastName: string },
     eventFolder: any,
+    pdfBuffer?: Buffer,
   ): Promise<void> {
     const { email, firstName, lastName } = user;
 
     try {
+      const attachments = pdfBuffer
+        ? [
+            {
+              filename: `Devis-${eventFolder.folderNumber}.pdf`,
+              content: pdfBuffer,
+              contentType: "application/pdf",
+            },
+          ]
+        : [];
+
       await this.mailerService.sendMail({
         to: email,
         subject: `Confirmation de votre réservation au Pavillon Les Lys`,
         template: "./booking-confirmation",
+        attachments,
         context: {
           firstName,
           lastName,

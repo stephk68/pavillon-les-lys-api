@@ -47,6 +47,21 @@ export class UpdateEventFolderDto {
   @IsDateString()
   validUntil?: string;
 
+  // Tarification globale : montant total HT négocié + remise.
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  totalAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  discountAmount?: number;
+
+  @IsOptional()
+  @IsString()
+  discountReason?: string;
+
   // New Pricing Fields
   @IsOptional()
   @IsNumber()

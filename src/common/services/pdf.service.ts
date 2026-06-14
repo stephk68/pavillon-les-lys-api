@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, InternalServerErrorException, Logger } from "@nestjs/common";
 import * as fs from "fs";
 import * as Handlebars from "handlebars";
 import * as path from "path";
@@ -6,6 +6,17 @@ import * as puppeteer from "puppeteer";
 
 @Injectable()
 export class PdfService {
+  private readonly logger = new Logger(PdfService.name);
+
+  constructor() {
+    // Enregistrer les helpers Handlebars une seule fois.
+    Handlebars.registerHelper("formatXOF", (value: number) =>
+      new Intl.NumberFormat("fr-FR", {
+        style: "currency",
+        currency: "XOF",
+      }).format(value),
+    );
+  }
   /**
    * Génère un PDF à partir d'un contenu HTML
    * @param html Le contenu HTML à convertir
@@ -27,6 +38,9 @@ export class PdfService {
   ): Promise<Buffer> {
     const browser = await puppeteer.launch({
       headless: true,
+      // En production (Docker Alpine) on pointe sur le Chromium système via
+      // PUPPETEER_EXECUTABLE_PATH ; en local, undefined → Chromium de Puppeteer.
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -45,12 +59,15 @@ export class PdfService {
         deviceScaleFactor: 2, // Haute résolution
       });
 
-      // Charger le contenu HTML
+      // Charger le contenu HTML. On n'attend pas l'inactivité réseau
+      // (networkidle0) pour éviter tout blocage si le CDN de polices est
+      // injoignable dans le conteneur ; un timeout borne le rendu.
       await page.setContent(html, {
-        waitUntil: "networkidle0",
+        waitUntil: "load",
+        timeout: 15000,
       });
 
-      // Attendre que les polices soient chargées
+      // Attendre que les polices soient chargées (best-effort)
       await page.evaluateHandle("document.fonts.ready");
 
       // Générer le PDF
@@ -68,40 +85,50 @@ export class PdfService {
       });
 
       return Buffer.from(pdfBuffer);
+    } catch (error) {
+      this.logger.error(
+        `Échec de la génération du PDF: ${error?.message || error}`,
+        error?.stack,
+      );
+      throw new InternalServerErrorException(
+        `Le devis ne peut être généré : ${error?.message || "erreur inconnue"}`,
+      );
     } finally {
       await browser.close();
     }
   }
 
   /**
-   * Génère un PDF de devis avec le template de luxe
-   * @param quoteData Données du devis
-   * @returns Buffer contenant le PDF
+   * Génère un PDF de devis (qui tient lieu de contrat). Tarification globale :
+   * un montant total négocié + une remise, les lignes ne portent que
+   * description + quantité. `includeSignature` ajoute la page de signature
+   * (version backoffice pour signature en présentiel) ; la version cliente est
+   * générée sans cette page.
    */
   async generateQuotePdf(quoteData: {
     number: string;
     date: string;
-    validUntil: string;
+    eventTypeLabel: string;
+    eventPeriod: string;
+    attendees: number;
     client: {
       name: string;
-      email?: string;
       phone?: string;
-      address?: string;
     };
     items: Array<{
       description: string;
       quantity: number;
-      unitPrice: number;
-      totalPrice: number;
     }>;
-    totalHT: number;
-    vatRate: number;
-    totalTTC: number;
-    notes?: string;
+    subtotal: number;
+    discountAmount: number;
+    discountReason?: string;
+    total: number;
+    cautionAmount: number;
+    includeSignature: boolean;
   }): Promise<Buffer> {
     const html = this.renderTemplate("pdf/quote", {
       ...quoteData,
-      vatAmount: quoteData.totalTTC - quoteData.totalHT,
+      hasDiscount: quoteData.discountAmount > 0,
     });
     return this.generatePdf(html, {
       format: "A4",
@@ -144,12 +171,6 @@ export class PdfService {
       `${name}.hbs`,
     );
     const source = fs.readFileSync(templatePath, "utf-8");
-    Handlebars.registerHelper("formatXOF", (value: number) =>
-      new Intl.NumberFormat("fr-FR", {
-        style: "currency",
-        currency: "XOF",
-      }).format(value),
-    );
     const template = Handlebars.compile(source);
     return template(data);
   }
