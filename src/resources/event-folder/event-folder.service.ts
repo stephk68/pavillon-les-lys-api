@@ -168,11 +168,14 @@ export class EventFolderService {
       );
     }
 
-    // Check validity of schedules
+    // Check validity of schedules.
+    // Un événement peut passer minuit (ex. 23:00 → 02:00) : endTime < startTime
+    // signifie « se termine le lendemain » (cf. toInterval). On rejette donc
+    // uniquement une durée nulle (heure de fin identique à l'heure de début).
     for (const s of dto.schedules) {
-      if (s.endTime <= s.startTime) {
+      if (s.endTime === s.startTime) {
         throw new BadRequestException(
-          "L'heure de fin doit être postérieure à l'heure de début pour chaque jour",
+          "L'heure de fin doit être différente de l'heure de début pour chaque jour",
         );
       }
     }
@@ -444,9 +447,9 @@ export class EventFolderService {
         );
       }
       for (const s of dto.schedules) {
-        if (s.endTime <= s.startTime) {
+        if (s.endTime === s.startTime) {
           throw new BadRequestException(
-            "L'heure de fin doit être postérieure à l'heure de début pour chaque jour",
+            "L'heure de fin doit être différente de l'heure de début pour chaque jour",
           );
         }
       }
@@ -1050,26 +1053,85 @@ export class EventFolderService {
 
   // ==================== AVAILABILITY & CALENDAR ====================
 
+  /**
+   * Construit un intervalle datetime absolu [start, end) à partir d'une date
+   * (jour) et de deux heures "HH:MM". Si endTime <= startTime, l'événement passe
+   * minuit : la fin est repoussée au lendemain (overnight).
+   */
+  private toInterval(
+    date: string | Date,
+    startTime: string,
+    endTime: string,
+  ): [Date, Date] {
+    const base = new Date(date);
+    base.setHours(0, 0, 0, 0);
+    const [sh, sm] = startTime.split(":").map(Number);
+    const [eh, em] = endTime.split(":").map(Number);
+    const start = new Date(base);
+    start.setHours(sh, sm, 0, 0);
+    const end = new Date(base);
+    end.setHours(eh, em, 0, 0);
+    if (end <= start) {
+      // Passe minuit → se termine le lendemain.
+      end.setDate(end.getDate() + 1);
+    }
+    return [start, end];
+  }
+
   async checkAvailability(
     schedules: { date: string | Date; startTime: string; endTime: string }[],
     excludeId?: string,
   ): Promise<boolean> {
-    const conflicts = await this.prisma.eventSchedule.count({
+    if (!schedules.length) return true;
+
+    // Intervalles absolus demandés (overnight-aware).
+    const requested = schedules.map((s) =>
+      this.toInterval(s.date, s.startTime, s.endTime),
+    );
+
+    // 1) Conflit entre les créneaux demandés eux-mêmes.
+    for (let i = 0; i < requested.length; i++) {
+      for (let j = i + 1; j < requested.length; j++) {
+        const [aStart, aEnd] = requested[i];
+        const [bStart, bEnd] = requested[j];
+        if (aStart < bEnd && aEnd > bStart) return false;
+      }
+    }
+
+    // 2) Fenêtre de dates élargie (±1 jour) pour capter un overnight voisin.
+    const days = schedules.map((s) => {
+      const d = new Date(s.date);
+      d.setHours(0, 0, 0, 0);
+      return d.getTime();
+    });
+    const minDate = new Date(Math.min(...days));
+    minDate.setDate(minDate.getDate() - 1);
+    const maxDate = new Date(Math.max(...days));
+    maxDate.setDate(maxDate.getDate() + 1);
+    maxDate.setHours(23, 59, 59, 999);
+
+    const existing = await this.prisma.eventSchedule.findMany({
       where: {
+        date: { gte: minDate, lte: maxDate },
         eventFolder: {
           status: {
             in: [EventStatus.BOOKED, EventStatus.READY, EventStatus.QUOTED],
           },
           ...(excludeId ? { id: { not: excludeId } } : {}),
         },
-        OR: schedules.map((s) => ({
-          date: new Date(s.date),
-          startTime: { lt: s.endTime },
-          endTime: { gt: s.startTime },
-        })),
       },
+      select: { date: true, startTime: true, endTime: true },
     });
-    return conflicts === 0;
+
+    // 3) Chevauchement avec un créneau existant (overnight-aware).
+    for (const e of existing) {
+      const [exStart, exEnd] = this.toInterval(e.date, e.startTime, e.endTime);
+      for (const [reqStart, reqEnd] of requested) {
+        if (reqStart < exEnd && reqEnd > exStart) return false;
+      }
+    }
+
+    return true;
   }
 
   async getCalendar(month?: number, year?: number) {
