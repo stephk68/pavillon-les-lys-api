@@ -6,17 +6,23 @@ import {
 } from "@nestjs/common";
 import { Role, User } from "@prisma/client";
 import * as bcrypt from "bcrypt";
+import * as crypto from "crypto";
 import { PrismaService } from "../../common/services/prisma.service";
+import { MailService } from "../../mail/mail.service";
+import { CreateStaffDto } from "./dto/create-staff.dto";
 import { CreateUserDto } from "./dto/create-user.dto";
 import { UpdateUserDto } from "./dto/update-user.dto";
 
 @Injectable()
 export class UserService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mailService: MailService,
+  ) {}
 
   async register(
-    createUserDto: CreateUserDto
-  ): Promise<Omit<User, "password">> {
+    createUserDto: CreateUserDto,
+  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">> {
     // Vérifier si l'utilisateur existe déjà
     const existingUser = await this.prisma.user.findUnique({
       where: { email: createUserDto.email },
@@ -30,7 +36,7 @@ export class UserService {
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(
       createUserDto.password,
-      saltRounds
+      saltRounds,
     );
 
     // Créer l'utilisateur avec le rôle CLIENT par défaut
@@ -47,8 +53,11 @@ export class UserService {
         lastName: true,
         phone: true,
         role: true,
+        isActive: true,
         isFirstLogin: true,
         lastLoginAt: true,
+        resetToken: true,
+        resetTokenExpiry: true,
         createdAt: true,
         updatedAt: true,
         createdBy: true,
@@ -60,11 +69,11 @@ export class UserService {
   }
 
   async createStaff(
-    createUserDto: CreateUserDto
-  ): Promise<Omit<User, "password">> {
+    createStaffDto: CreateStaffDto,
+  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">> {
     // Vérifier si l'utilisateur existe déjà
     const existingUser = await this.prisma.user.findUnique({
-      where: { email: createUserDto.email },
+      where: { email: createStaffDto.email },
     });
 
     if (existingUser) {
@@ -73,26 +82,28 @@ export class UserService {
 
     // Valider que le rôle est ADMIN ou EVENT_MANAGER
     if (
-      !createUserDto.role ||
-      (createUserDto.role !== Role.ADMIN &&
-        createUserDto.role !== Role.EVENT_MANAGER)
+      !createStaffDto.role ||
+      (createStaffDto.role !== Role.ADMIN &&
+        createStaffDto.role !== Role.EVENT_MANAGER)
     ) {
       throw new BadRequestException("Le rôle doit être ADMIN ou EVENT_MANAGER");
     }
 
-    // Hasher le mot de passe
+    // Générer un mot de passe temporaire aléatoire sécurisé (jamais divulgué)
+    const tempPassword = crypto.randomBytes(32).toString("hex");
     const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(
-      createUserDto.password,
-      saltRounds
-    );
+    const hashedPassword = await bcrypt.hash(tempPassword, saltRounds);
 
-    // Créer l'utilisateur staff
+    // Créer l'utilisateur staff avec isFirstLogin=true (valeur par défaut)
     const user = await this.prisma.user.create({
       data: {
-        ...createUserDto,
+        email: createStaffDto.email,
+        firstName: createStaffDto.firstName,
+        lastName: createStaffDto.lastName,
+        phone: createStaffDto.phone ?? "",
         password: hashedPassword,
-        role: createUserDto.role,
+        role: createStaffDto.role,
+        isFirstLogin: true,
       },
       select: {
         id: true,
@@ -101,48 +112,67 @@ export class UserService {
         lastName: true,
         phone: true,
         role: true,
+        isActive: true,
         isFirstLogin: true,
         lastLoginAt: true,
+        resetToken: true,
+        resetTokenExpiry: true,
         createdAt: true,
         updatedAt: true,
         createdBy: true,
         updatedBy: true,
       },
     });
+
+    // Envoyer l'email de bienvenue (fire-and-forget)
+    this.mailService.sendStaffWelcomeEmail(user).catch(() => {});
 
     return user;
   }
 
-  async findAll(options?: {
-    role?: Role;
-    skip?: number;
-    take?: number;
-  }): Promise<Omit<User, "password">[]> {
+  async findAll(options?: { role?: Role; skip?: number; take?: number }) {
     const { role, skip = 0, take = 50 } = options || {};
 
-    return this.prisma.user.findMany({
-      where: role ? { role } : undefined,
+    const where = role ? { role } : undefined;
+
+    const [data, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        skip,
+        take,
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          role: true,
+          isActive: true,
+          isFirstLogin: true,
+          lastLoginAt: true,
+          resetToken: true,
+          resetTokenExpiry: true,
+          createdAt: true,
+          updatedAt: true,
+          createdBy: true,
+          updatedBy: true,
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return {
+      data,
+      total,
       skip,
       take,
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        phone: true,
-        role: true,
-        isFirstLogin: true,
-        lastLoginAt: true,
-        createdAt: true,
-        updatedAt: true,
-        createdBy: true,
-        updatedBy: true,
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    };
   }
 
-  async findOne(id: string): Promise<Omit<User, "password">> {
+  async findOne(
+    id: string,
+  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">> {
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
@@ -152,18 +182,27 @@ export class UserService {
         lastName: true,
         phone: true,
         role: true,
+        isActive: true,
         isFirstLogin: true,
         lastLoginAt: true,
+        resetToken: true,
+        resetTokenExpiry: true,
         createdAt: true,
         updatedAt: true,
         createdBy: true,
         updatedBy: true,
-        reservations: {
+        eventFolders: {
           select: {
             id: true,
+            folderNumber: true,
             eventType: true,
-            start: true,
-            end: true,
+            schedules: {
+              select: {
+                date: true,
+                startTime: true,
+                endTime: true,
+              },
+            },
             status: true,
             attendees: true,
           },
@@ -187,8 +226,8 @@ export class UserService {
 
   async update(
     id: string,
-    updateUserDto: UpdateUserDto
-  ): Promise<Omit<User, "password">> {
+    updateUserDto: UpdateUserDto,
+  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">> {
     // Vérifier si l'utilisateur existe
     await this.findOne(id);
 
@@ -213,8 +252,11 @@ export class UserService {
         lastName: true,
         phone: true,
         role: true,
+        isActive: true,
         isFirstLogin: true,
         lastLoginAt: true,
+        resetToken: true,
+        resetTokenExpiry: true,
         createdAt: true,
         updatedAt: true,
         createdBy: true,
@@ -228,7 +270,7 @@ export class UserService {
   async updatePassword(
     id: string,
     currentPassword: string,
-    newPassword: string
+    newPassword: string,
   ): Promise<void> {
     const user = await this.prisma.user.findUnique({
       where: { id },
@@ -241,7 +283,7 @@ export class UserService {
     // Vérifier le mot de passe actuel
     const isCurrentPasswordValid = await bcrypt.compare(
       currentPassword,
-      user.password
+      user.password,
     );
     if (!isCurrentPasswordValid) {
       throw new BadRequestException("Le mot de passe actuel est incorrect");
@@ -261,17 +303,17 @@ export class UserService {
     // Vérifier si l'utilisateur existe
     await this.findOne(id);
 
-    // Vérifier s'il a des réservations actives
-    const activeReservations = await this.prisma.reservation.findMany({
+    // Vérifier s'il a des dossiers événement actifs
+    const activeFolders = await this.prisma.eventFolder.findMany({
       where: {
         userId: id,
-        status: { in: ["PENDING", "CONFIRMED"] },
+        status: { in: ["QUOTED", "BOOKED", "READY"] },
       },
     });
 
-    if (activeReservations.length > 0) {
+    if (activeFolders.length > 0) {
       throw new BadRequestException(
-        "Impossible de supprimer cet utilisateur car il a des réservations actives"
+        "Impossible de supprimer cet utilisateur car il a des dossiers événement actifs",
       );
     }
 
@@ -283,7 +325,7 @@ export class UserService {
   async getUserStats(id: string) {
     const user = await this.findOne(id);
 
-    const stats = await this.prisma.reservation.groupBy({
+    const stats = await this.prisma.eventFolder.groupBy({
       by: ["status"],
       where: { userId: id },
       _count: true,
@@ -291,7 +333,7 @@ export class UserService {
 
     const totalSpent = await this.prisma.payment.aggregate({
       where: {
-        userId: id,
+        eventFolder: { userId: id },
         status: "PAID",
       },
       _sum: {
@@ -301,12 +343,14 @@ export class UserService {
 
     return {
       user,
-      reservationStats: stats,
+      eventFolderStats: stats,
       totalSpent: totalSpent._sum.amount || 0,
     };
   }
 
-  async searchUsers(query: string): Promise<Omit<User, "password">[]> {
+  async searchUsers(
+    query: string,
+  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">[]> {
     return this.prisma.user.findMany({
       where: {
         OR: [
@@ -322,8 +366,11 @@ export class UserService {
         lastName: true,
         phone: true,
         role: true,
+        isActive: true,
         isFirstLogin: true,
         lastLoginAt: true,
+        resetToken: true,
+        resetTokenExpiry: true,
         createdAt: true,
         updatedAt: true,
         createdBy: true,
@@ -333,7 +380,7 @@ export class UserService {
     });
   }
 
-  async getUsersByRole(role: Role): Promise<Omit<User, "password">[]> {
+  async getUsersByRole(role: Role) {
     return this.findAll({ role });
   }
 
@@ -341,9 +388,40 @@ export class UserService {
     return this.prisma.user.count();
   }
 
+  async toggleStatus(
+    id: string,
+  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">> {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException(`Utilisateur avec l'ID ${id} non trouvé`);
+    }
+
+    return this.prisma.user.update({
+      where: { id },
+      data: { isActive: !user.isActive },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        role: true,
+        isActive: true,
+        isFirstLogin: true,
+        lastLoginAt: true,
+        resetToken: true,
+        resetTokenExpiry: true,
+        createdAt: true,
+        updatedAt: true,
+        createdBy: true,
+        updatedBy: true,
+      },
+    });
+  }
+
   async validatePassword(
     password: string,
-    hashedPassword: string
+    hashedPassword: string,
   ): Promise<boolean> {
     return bcrypt.compare(password, hashedPassword);
   }

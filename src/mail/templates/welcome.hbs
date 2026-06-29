@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { margin: 0; padding: 0; background-color: #F5F0E8; font-family: Georgia, 'Times New Roman', serif; }
+        .wrapper { background-color: #F5F0E8; padding: 40px 20px; }
+        .container { max-width: 600px; margin: 0 auto; background-color: #FDFAF5; border: 1px solid rgba(201,161,74,0.15); border-radius: 0; overflow: hidden; border-top: 2px solid #B89140; }
+        .header { text-align: center; padding: 40px 40px 20px; border-bottom: 1px solid rgba(201,161,74,0.2); }
+        .logo { font-family: 'Playfair Display', Georgia, serif; font-weight: 300; color: #B89140; font-size: 22px; letter-spacing: 0.25em; text-transform: uppercase; text-decoration: none; display: block; }
+        .content { padding: 35px 40px; }
+        h1 { font-family: 'Playfair Display', Georgia, serif; color: #000000; font-size: 26px; text-align: center; margin: 0 0 25px; font-weight: 300; letter-spacing: 0.04em; line-height: 1.2; }
+        p { color: #000000; line-height: 1.7; font-size: 15px; margin: 0 0 16px; }
+        .text-muted { color: #6B5F4E; }
+        .highlight-box { background: #F5F0E8; border-left: 4px solid #B89140; padding: 20px 24px; margin: 25px 0; }
+        .highlight-box p { margin: 0 0 8px; }
+        .highlight-box p:last-child { margin: 0; }
+        .btn-cta { display: inline-block; background-color: #B89140; color: #FDFAF5; padding: 14px 32px; text-decoration: none; border-radius: 0; font-weight: 600; font-size: 14px; letter-spacing: 0.5px; }
+        .btn-wrapper { text-align: center; margin: 30px 0 10px; }
+        .divider { height: 1px; background-color: rgba(201,161,74,0.2); margin: 30px 0; }
+        .footer { text-align: center; padding: 25px 40px; }
+        .footer p { font-size: 12px; color: #A97C50; margin: 0 0 6px; line-height: 1.5; }
+        .footer .brand { font-family: 'Playfair Display', Georgia, serif; font-weight: 600; font-size: 13px; color: #B89140; }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <div class="container">
+            <div class="header">
+                <a href="https://pavillonleslys.ci" class="logo">PAVILLON LES LYS</a>
+            </div>
+
+            <div class="content">
+                <h1>Bienvenue, {{firstName}} !</h1>
+
+                <p>Bonjour {{firstName}} {{lastName}},</p>
+
+                <p>Nous sommes ravis de vous accueillir au sein de la communauté Pavillon Les Lys. Votre compte a été créé avec succès.</p>
+
+                <div class="highlight-box">
+                    <p><strong>Le Pavillon Les Lys</strong> est votre espace événementiel d'exception à Abidjan.</p>
+                    <p class="text-muted">Depuis votre espace personnel, vous pouvez suivre vos événements, consulter vos devis et gérer vos réservations.</p>
+                </div>
+
+                <p>Pour commencer, accédez à votre tableau de bord :</p>
+
+                <div class="btn-wrapper">
+                    <a href="{{dashboardUrl}}" class="btn-cta">Accéder à mon espace</a>
+                </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="footer">
+                <p class="brand">Pavillon Les Lys — Excellence & Convivialité</p>
+                <p>Riviera Palmeraie, Abidjan — Côte d'Ivoire</p>
+                <p><em>Ce message est automatique, merci de ne pas y répondre directement.</em></p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

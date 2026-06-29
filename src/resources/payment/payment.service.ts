@@ -1,416 +1,458 @@
 import {
   BadRequestException,
-  ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
-} from '@nestjs/common';
-import { Payment, PaymentStatus, PaymentType } from '@prisma/client';
-import { PrismaService } from '../../common/services/prisma.service';
-import { ReservationService } from '../reservation/reservation.service';
-import { CreatePaymentDto } from './dto/create-payment.dto';
-import { UpdatePaymentDto } from './dto/update-payment.dto';
+} from "@nestjs/common";
+import { EventStatus, PaymentStatus, PaymentType, Prisma } from "@prisma/client";
+import { PdfService } from "../../common/services/pdf.service";
+import { PrismaService } from "../../common/services/prisma.service";
+import { MailService } from "../../mail/mail.service";
+import { AuditLogService } from "../audit-log/audit-log.service";
+import { EventFolderService } from "../event-folder/event-folder.service";
+import { CreatePaymentDto, UpdatePaymentDto } from "./dto/payment.dto";
 
 @Injectable()
 export class PaymentService {
+  private readonly logger = new Logger(PaymentService.name);
+
   constructor(
     private readonly prisma: PrismaService,
-    private readonly reservationService: ReservationService,
+    private readonly pdfService: PdfService,
+    private readonly auditLogService: AuditLogService,
+    private readonly mailService: MailService,
+    private readonly eventFolderService: EventFolderService,
   ) {}
 
-  async create(
-    createPaymentDto: CreatePaymentDto,
-    userId: string,
-  ): Promise<Payment> {
-    // Vérifier que la réservation existe et appartient à l'utilisateur
-    const reservation = await this.reservationService.findOne(
-      createPaymentDto.reservationId,
-    );
+  // ==================== CRUD ====================
 
-    if (reservation.userId !== userId) {
-      throw new BadRequestException(
-        'Vous ne pouvez payer que vos propres réservations',
-      );
-    }
-
-    // Vérifier qu'il n'y a pas déjà un paiement validé pour cette réservation
-    const existingPayment = await this.prisma.payment.findFirst({
-      where: {
-        reservationId: createPaymentDto.reservationId,
-        status: PaymentStatus.PAID,
-      },
+  async create(dto: CreatePaymentDto, user: any) {
+    // Verify event folder exists
+    const folder = await this.prisma.eventFolder.findUnique({
+      where: { id: dto.eventFolderId },
     });
-
-    if (existingPayment) {
-      throw new ConflictException('Cette réservation a déjà été payée');
+    if (!folder) {
+      throw new NotFoundException("Dossier événement introuvable");
     }
 
-    // Créer le paiement
-    const payment = await this.prisma.payment.create({
+    return this.prisma.payment.create({
       data: {
-        ...createPaymentDto,
-        userId,
+        eventFolderId: dto.eventFolderId,
+        userId: folder.userId,
+        amount: new Prisma.Decimal(dto.amount),
+        type: dto.type,
         status: PaymentStatus.PENDING,
-        paidAt: new Date(),
+        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+        proofDocument: dto.proofDocument,
+        isRefundable:
+          dto.type === PaymentType.CAUTION ? true : dto.isRefundable || false,
+        createdBy: user?.id,
       },
       include: {
-        User: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
-          },
+        eventFolder: {
+          select: { id: true, folderNumber: true, status: true },
         },
-        reservation: {
-          select: {
-            id: true,
-            eventType: true,
-            start: true,
-            end: true,
-            attendees: true,
-          },
+        user: {
+          select: { id: true, email: true, firstName: true, lastName: true },
         },
       },
     });
-
-    return payment;
   }
 
   async findAll(options?: {
     status?: PaymentStatus;
     type?: PaymentType;
+    eventFolderId?: string;
     userId?: string;
-    reservationId?: string;
     skip?: number;
     take?: number;
-    startDate?: Date;
-    endDate?: Date;
   }) {
-    const {
-      status,
-      type,
-      userId,
-      reservationId,
-      skip = 0,
-      take = 50,
-      startDate,
-      endDate,
-    } = options || {};
+    const where: Prisma.PaymentWhereInput = {};
+    if (options?.status) where.status = options.status;
+    if (options?.type) where.type = options.type;
+    if (options?.eventFolderId) where.eventFolderId = options.eventFolderId;
+    if (options?.userId) where.userId = options.userId;
 
-    const where: any = {};
-
-    if (status) where.status = status;
-    if (type) where.type = type;
-    if (userId) where.userId = userId;
-    if (reservationId) where.reservationId = reservationId;
-
-    if (startDate || endDate) {
-      where.paymentDate = {};
-      if (startDate) where.paymentDate.gte = startDate;
-      if (endDate) where.paymentDate.lte = endDate;
-    }
-
-    return this.prisma.payment.findMany({
-      where,
-      skip,
-      take,
-      include: {
-        User: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
+    const [data, total] = await Promise.all([
+      this.prisma.payment.findMany({
+        where,
+        include: {
+          eventFolder: {
+            select: {
+              id: true,
+              folderNumber: true,
+              status: true,
+              eventType: true,
+              schedules: { select: { date: true } },
+            },
+          },
+          user: {
+            select: { id: true, email: true, firstName: true, lastName: true },
           },
         },
-        reservation: {
-          select: {
-            id: true,
-            eventType: true,
-            start: true,
-            end: true,
-            attendees: true,
-          },
-        },
-      },
-      orderBy: { paidAt: 'desc' },
-    });
+        orderBy: { createdAt: "desc" },
+        skip: options?.skip || 0,
+        take: options?.take || 50,
+      }),
+      this.prisma.payment.count({ where }),
+    ]);
+
+    return { data, total };
   }
 
-  async findOne(id: string): Promise<Payment> {
+  async findOne(id: string) {
     const payment = await this.prisma.payment.findUnique({
       where: { id },
       include: {
-        User: {
+        eventFolder: {
           select: {
             id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
+            folderNumber: true,
+            status: true,
+            eventType: true,
+            schedules: { select: { date: true } },
+            totalTTC: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                phone: true,
+              },
+            },
           },
         },
-        reservation: {
-          select: {
-            id: true,
-            eventType: true,
-            start: true,
-            end: true,
-            attendees: true,
-            status: true,
-          },
+        user: {
+          select: { id: true, email: true, firstName: true, lastName: true },
         },
       },
     });
 
     if (!payment) {
-      throw new NotFoundException(`Paiement avec l'ID ${id} non trouvé`);
+      throw new NotFoundException(`Paiement ${id} introuvable`);
     }
-
     return payment;
   }
 
-  async update(
-    id: string,
-    updatePaymentDto: UpdatePaymentDto,
-  ): Promise<Payment> {
-    // Vérifier que le paiement existe
-    await this.findOne(id);
-
-    const updatedPayment = await this.prisma.payment.update({
-      where: { id },
-      data: updatePaymentDto,
-      include: {
-        User: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        reservation: {
-          select: {
-            id: true,
-            eventType: true,
-            start: true,
-            end: true,
-            attendees: true,
-          },
-        },
-      },
-    });
-
-    return updatedPayment;
-  }
-
-  async updateStatus(id: string, status: PaymentStatus): Promise<Payment> {
+  async update(id: string, dto: UpdatePaymentDto) {
     const payment = await this.findOne(id);
 
-    // Si le paiement est confirmé, confirmer aussi la réservation
-    if (
-      status === PaymentStatus.PAID &&
-      payment.status !== PaymentStatus.PAID
-    ) {
-      await this.reservationService.confirm(payment.reservationId);
+    if (payment.status === PaymentStatus.PAID) {
+      throw new BadRequestException(
+        "Impossible de modifier un paiement validé",
+      );
     }
 
     return this.prisma.payment.update({
       where: { id },
       data: {
-        status,
-        paidAt: status === PaymentStatus.PAID ? new Date() : payment.paidAt,
+        ...(dto.amount !== undefined && {
+          amount: new Prisma.Decimal(dto.amount),
+        }),
+        ...(dto.proofDocument !== undefined && {
+          proofDocument: dto.proofDocument,
+        }),
+        ...(dto.dueDate !== undefined && {
+          dueDate: new Date(dto.dueDate),
+        }),
       },
       include: {
-        User: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        reservation: {
-          select: {
-            id: true,
-            eventType: true,
-            start: true,
-            end: true,
-            attendees: true,
-          },
+        eventFolder: {
+          select: { id: true, folderNumber: true, status: true },
         },
       },
     });
   }
 
-  async markAsPaid(id: string): Promise<Payment> {
-    return this.updateStatus(id, PaymentStatus.PAID);
-  }
-
-  async markAsFailed(id: string): Promise<Payment> {
-    return this.updateStatus(id, PaymentStatus.REFUNDED);
-  }
-
-  async refund(id: string): Promise<Payment> {
-    const payment = await this.findOne(id);
-
-    if (payment.status !== PaymentStatus.PAID) {
-      throw new BadRequestException(
-        'Seuls les paiements validés peuvent être remboursés',
-      );
-    }
-
-    // Marquer le paiement comme remboursé
-    const refundedPayment = await this.updateStatus(id, PaymentStatus.REFUNDED);
-
-    // Optionnel: Annuler la réservation associée
-    await this.reservationService.cancel(payment.reservationId);
-
-    return refundedPayment;
-  }
-
-  async remove(id: string): Promise<void> {
+  async remove(id: string) {
     const payment = await this.findOne(id);
 
     if (payment.status === PaymentStatus.PAID) {
       throw new BadRequestException(
-        'Impossible de supprimer un paiement validé',
+        "Impossible de supprimer un paiement validé",
       );
     }
 
-    await this.prisma.payment.delete({
+    await this.prisma.payment.delete({ where: { id } });
+  }
+
+  async updateProofDocument(id: string, filename: string) {
+    return this.prisma.payment.update({
       where: { id },
+      data: { proofDocument: filename },
     });
   }
 
-  async getUserPayments(userId: string): Promise<Payment[]> {
-    return this.findAll({ userId });
-  }
+  // ==================== STATUS ====================
 
-  async getReservationPayments(reservationId: string): Promise<Payment[]> {
-    return this.findAll({ reservationId });
-  }
+  async markAsPaid(id: string) {
+    const payment = await this.findOne(id);
 
-  async getPaymentStats() {
-    const stats = await this.prisma.payment.groupBy({
-      by: ['status'],
-      _count: true,
-      _sum: {
-        amount: true,
+    if (payment.status === PaymentStatus.PAID) {
+      throw new BadRequestException("Ce paiement est déjà validé");
+    }
+
+    const updated = await this.prisma.payment.update({
+      where: { id },
+      data: {
+        status: PaymentStatus.PAID,
+        paidAt: new Date(),
+      },
+      include: {
+        eventFolder: {
+          select: {
+            id: true,
+            folderNumber: true,
+            status: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+        },
       },
     });
 
-    const totalRevenue = await this.prisma.payment.aggregate({
-      where: { status: PaymentStatus.PAID },
-      _sum: { amount: true },
+    // Audit log (fire-and-forget)
+    this.auditLogService
+      .create({
+        action: "PAYMENT_VALIDATED",
+        description: `Paiement ${payment.type} de ${Number(payment.amount).toLocaleString("fr-FR")} XOF marqué comme PAYÉ pour le dossier ${updated.eventFolder.folderNumber}`,
+        entityType: "Payment",
+        entityId: id,
+        folderNumber: updated.eventFolder.folderNumber,
+        userId: payment.userId || updated.eventFolder.user?.id,
+      })
+      .catch(() => {});
+
+    // Envoi email de confirmation de paiement (fire-and-forget)
+    if (payment.user) {
+      this.mailService
+        .sendPaymentConfirmation(payment.user, {
+          amount: payment.amount,
+          type: payment.type,
+          paidAt: new Date(),
+          paymentMethod: "Virement",
+        })
+        .catch((e) =>
+          this.logger.error(
+            `Envoi confirmation paiement échoué (${id}): ${e.message}`,
+          ),
+        );
+    }
+
+    // Passage automatique en BOOKED lorsque l'acompte est validé sur un
+    // dossier en QUOTED. transitionStatus re-valide l'acompte (≥ 50% PAID)
+    // et envoie l'email de confirmation de réservation (avec PDF devis).
+    if (
+      payment.type === PaymentType.ACOMPTE &&
+      updated.eventFolder.status === EventStatus.QUOTED
+    ) {
+      try {
+        await this.eventFolderService.transitionStatus(
+          updated.eventFolder.id,
+          EventStatus.BOOKED,
+        );
+      } catch (e) {
+        this.logger.error(
+          `Passage auto en BOOKED échoué pour le dossier ${updated.eventFolder.folderNumber}: ${e.message}`,
+        );
+      }
+    }
+
+    return updated;
+  }
+
+  async refund(id: string) {
+    const payment = await this.findOne(id);
+
+    if (payment.status !== PaymentStatus.PAID) {
+      throw new BadRequestException(
+        "Seuls les paiements validés peuvent être remboursés",
+      );
+    }
+
+    const updated = await this.prisma.payment.update({
+      where: { id },
+      data: {
+        status: PaymentStatus.REFUNDED,
+        refundedAmount: payment.amount,
+        refundedAt: new Date(),
+      },
+      include: {
+        eventFolder: {
+          select: { id: true, folderNumber: true, status: true },
+        },
+      },
     });
 
-    const totalPayments = await this.prisma.payment.count();
+    // Audit log (fire-and-forget)
+    this.auditLogService
+      .create({
+        action: "PAYMENT_REFUNDED",
+        description: `Remboursement ${payment.type} de ${Number(payment.amount).toLocaleString("fr-FR")} XOF pour le dossier ${updated.eventFolder.folderNumber}`,
+        entityType: "Payment",
+        entityId: id,
+        folderNumber: updated.eventFolder.folderNumber,
+        userId: payment.userId || "",
+      })
+      .catch(() => {});
+
+    return updated;
+  }
+
+  // ==================== QUERIES ====================
+
+  async getEventFolderPayments(eventFolderId: string) {
+    return this.findAll({ eventFolderId });
+  }
+
+  async getPendingPayments() {
+    return this.findAll({ status: PaymentStatus.PENDING });
+  }
+
+  async getUserPayments(userId: string) {
+    return this.findAll({ userId });
+  }
+
+  // ==================== STATS ====================
+
+  async getStats() {
+    const [byStatus, totalRevenue, monthlyRevenue] = await Promise.all([
+      this.prisma.payment.groupBy({
+        by: ["status"],
+        _count: { _all: true },
+        _sum: { amount: true },
+      }),
+      this.prisma.payment.aggregate({
+        where: { status: PaymentStatus.PAID },
+        _sum: { amount: true },
+      }),
+      this.getMonthlyRevenue(
+        new Date().getFullYear(),
+        new Date().getMonth() + 1,
+      ),
+    ]);
 
     return {
-      totalPayments,
-      totalRevenue: totalRevenue._sum.amount || 0,
-      byStatus: stats,
+      byStatus: byStatus.map((s) => ({
+        status: s.status,
+        count: s._count._all,
+        total: Number(s._sum.amount || 0),
+      })),
+      totalRevenue: Number(totalRevenue._sum.amount || 0),
+      currentMonthRevenue: monthlyRevenue,
     };
   }
 
   async getMonthlyRevenue(year: number, month: number) {
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0);
+    const startOfMonth = new Date(year, month - 1, 1);
+    const endOfMonth = new Date(year, month, 0, 23, 59, 59);
 
-    const revenue = await this.prisma.payment.aggregate({
+    const result = await this.prisma.payment.aggregate({
       where: {
         status: PaymentStatus.PAID,
-        paidAt: {
-          gte: startDate,
-          lte: endDate,
-        },
+        paidAt: { gte: startOfMonth, lte: endOfMonth },
       },
       _sum: { amount: true },
-      _count: true,
+      _count: { _all: true },
     });
 
     return {
-      month,
       year,
-      revenue: revenue._sum.amount || 0,
-      count: revenue._count,
+      month,
+      revenue: Number(result._sum.amount || 0),
+      count: result._count._all,
     };
   }
 
-  async getPendingPayments(): Promise<Payment[]> {
-    return this.findAll({ status: PaymentStatus.PENDING });
-  }
-
-  async getFailedPayments(): Promise<Payment[]> {
-    return this.findAll({ status: PaymentStatus.REFUNDED });
-  }
-
-  // Simulation de traitement de paiement (à remplacer par votre gateway)
-  async processPayment(
-    paymentId: string,
-    paymentMethod: any,
-  ): Promise<Payment> {
-    const payment = await this.findOne(paymentId);
-
-    if (payment.status !== PaymentStatus.PENDING) {
-      throw new BadRequestException('Ce paiement ne peut pas être traité');
-    }
-
-    try {
-      // Ici, vous intégreriez votre gateway de paiement (Stripe, PayPal, etc.)
-      // const result = await this.stripeService.processPayment(payment.amount, paymentMethod);
-
-      // Simulation d'un paiement réussi
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      return this.markAsPaid(paymentId);
-    } catch (error) {
-      await this.markAsFailed(paymentId);
-      throw new BadRequestException('Échec du traitement du paiement');
-    }
-  }
-
-  async createInvoice(paymentId: string): Promise<any> {
-    const payment = await this.findOne(paymentId);
-
-    if (payment.status !== PaymentStatus.PAID) {
-      throw new BadRequestException(
-        'Une facture ne peut être générée que pour un paiement validé',
-      );
-    }
-
-    // informations sur le client et la réservation
-    const customer = this.prisma.user.findUnique({
-      where: { id: payment.userId },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-      },
-    });
-
-    if (!customer) {
-      throw new NotFoundException('Client non trouvé pour ce paiement');
-    }
-
-    // Information de la réservation associée
-    const reservation = await this.reservationService.findOne(
-      payment.reservationId,
+  async getYearlyRevenue(year: number) {
+    const months = await Promise.all(
+      Array.from({ length: 12 }, (_, i) => this.getMonthlyRevenue(year, i + 1)),
     );
-
-    if (!reservation) {
-      throw new NotFoundException('Réservation non trouvée pour ce paiement');
-    }
-
-    // Logique de génération de facture
     return {
-      id: `INV-${payment.id}`,
-      paymentId: payment.id,
-      amount: payment.amount,
-      date: payment.paidAt,
-      customer: customer,
-      reservation: reservation,
+      year,
+      months,
+      total: months.reduce((sum, m) => sum + m.revenue, 0),
     };
+  }
+
+  // ==================== INVOICE PDF ====================
+
+  async generateInvoicePdf(id: string): Promise<Buffer> {
+    const payment = await this.findOne(id);
+    const folder = payment.eventFolder;
+    const client = folder.user;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: 'Segoe UI', Arial, sans-serif; padding: 40px; color: #333; }
+          .header { text-align: center; margin-bottom: 30px; }
+          .header h1 { color: #1a1a2e; font-size: 28px; }
+          .info { display: flex; justify-content: space-between; margin: 20px 0; }
+          .info div { flex: 1; }
+          table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+          th { background: #1a1a2e; color: white; padding: 12px; text-align: left; }
+          td { padding: 12px; border-bottom: 1px solid #ddd; }
+          .total { text-align: right; font-size: 20px; font-weight: bold; margin-top: 20px; }
+          .footer { text-align: center; margin-top: 40px; font-size: 12px; color: #888; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>PAVILLON LES LYS</h1>
+          <p>Facture / Reçu de paiement</p>
+        </div>
+        <div class="info">
+          <div>
+            <strong>Client:</strong><br>
+            ${client.firstName} ${client.lastName}<br>
+            ${client.email}<br>
+            ${client.phone || ""}
+          </div>
+          <div style="text-align: right;">
+            <strong>Dossier:</strong> ${folder.folderNumber}<br>
+            <strong>Date:</strong> ${new Date(payment.paidAt || payment.createdAt).toLocaleDateString("fr-FR")}<br>
+            <strong>Statut:</strong> ${payment.status}
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Montant</th>
+              <th>Statut</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>${payment.type}</td>
+              <td>${Number(payment.amount).toLocaleString("fr-FR")} XOF</td>
+              <td>${payment.status}</td>
+              <td>${new Date(payment.paidAt || payment.createdAt).toLocaleDateString("fr-FR")}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="total">
+          Total : ${Number(payment.amount).toLocaleString("fr-FR")} XOF
+        </div>
+        <div class="footer">
+          <p>Pavillon Les Lys — Salle de réception 450m²</p>
+        </div>
+      </body>
+      </html>
+    `;
+
+    return this.pdfService.generatePdf(html);
   }
 }

@@ -1,66 +1,80 @@
-## Robust multi-stage Dockerfile for Pavillon Les Lys API (NestJS + Prisma)
-# Stage 1: Dependencies and build
-FROM node:20.13.0-alpine AS builder
+# ============================================
+# API Pavillon Les Lys - NestJS + Prisma
+# Build multi-stage : image finale légère (pas de devDeps, pas de cache yarn,
+# pas d'outils de compilation, pas de code source).
+# ============================================
 
-# System deps for node-gyp/native modules and openssl
-RUN apk add --no-cache libc6-compat openssl python3 make g++ wget
+# ─── Stage 1 : build (compilation TS + génération client Prisma) ───
+FROM node:20-alpine AS builder
+
+# Outils nécessaires pour compiler les modules natifs (bcrypt) au build
+RUN apk add --no-cache libc6-compat openssl python3 make g++
 
 WORKDIR /app
 
-# Use Yarn if present; install Yarn 1.x only if missing
-RUN yarn --version || (npm install -g yarn@1.22.22 && yarn --version)
-
-# Copy manifests first to leverage Docker cache for dependency install
 COPY package.json yarn.lock ./
-
-# Install all deps (dev included) for build
 RUN yarn install --frozen-lockfile
 
-# Copy the rest of the project (filtered by .dockerignore)
 COPY . .
+RUN npx prisma generate && yarn build
 
-# Generate Prisma client (requires schema and node_modules)
-RUN npx prisma generate
+# ─── Stage 2 : dépendances de production uniquement ───
+FROM node:20-alpine AS proddeps
 
-# Build NestJS (outputs to dist/)
-RUN yarn build
+RUN apk add --no-cache libc6-compat openssl python3 make g++
 
-# Prepare production node_modules
-RUN rm -rf node_modules && \
-  YARN_ENABLE_IMMUTABLE_INSTALLS=false yarn install --frozen-lockfile --production && \
-  yarn cache clean
-
-# Stage 2: Production runtime image
-FROM node:20.13.0-alpine AS runner
-
-# Minimal system deps for SSL
-RUN apk add --no-cache libc6-compat openssl wget
-
-# Create non-root user
-RUN addgroup -S nodejs && adduser -S nestjs -G nodejs
-USER nestjs
 WORKDIR /app
 
-ENV NODE_ENV=production \
-    PORT=3000
+COPY package.json yarn.lock ./
+RUN yarn install --frozen-lockfile --production=true && yarn cache clean
 
-# Copy runtime artifacts from builder
-COPY --from=builder --chown=nestjs:nodejs /app/package.json ./
-COPY --from=builder --chown=nestjs:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=nestjs:nodejs /app/prisma ./prisma
-COPY --from=builder --chown=nestjs:nodejs /app/dist ./dist
+# Le client Prisma doit être généré dans ce node_modules de production
+COPY prisma ./prisma
+RUN npx prisma generate
 
-# Copy entrypoint script
-COPY --chown=nestjs:nodejs docker-entrypoint.sh ./
-USER root
-RUN chmod +x docker-entrypoint.sh
+# ─── Stage 3 : runtime (image finale) ───
+FROM node:20-alpine AS runtime
+
+# Dépendances RUNTIME seulement : chromium + polices pour Puppeteer (PDF).
+# Pas de python3/make/g++ ici → image plus légère.
+RUN apk add --no-cache \
+    libc6-compat \
+    openssl \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    && rm -rf /var/cache/apk/*
+
+ENV PUPPETEER_SKIP_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
+    NODE_ENV=production
+
+WORKDIR /app
+
+# node_modules de prod (avec client Prisma généré) + build compilé
+COPY --from=proddeps /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+
+# Fichiers nécessaires au runtime : manifeste + schéma/migrations/seed Prisma.
+# (nest-cli.json et yarn.lock ne servent qu'au build, pas au runtime.)
+COPY package.json ./
+COPY prisma ./prisma
+
+# Dossiers d'uploads (montés en volume au runtime) + utilisateur non-root
+RUN mkdir -p /app/uploads/proofs \
+             /app/uploads/feedback \
+             /app/uploads/checklists \
+             /app/uploads/inventory \
+    && addgroup -g 1001 -S nodejs \
+    && adduser -S nestjs -u 1001 -G nodejs \
+    && chown -R nestjs:nodejs /app
+
 USER nestjs
 
-# Healthcheck against the Nest health endpoint (adjust if different)
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=5 \
-  CMD wget -qO- http://localhost:3000/health | grep -q 'status' || exit 1
+EXPOSE 4000
 
-EXPOSE 3000
-
-ENTRYPOINT ["./docker-entrypoint.sh"]
-CMD ["node", "dist/main.js"]
+# Migrations Prisma puis démarrage de l'application compilée
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main"]

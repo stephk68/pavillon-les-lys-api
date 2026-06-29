@@ -1,76 +1,84 @@
-import {
-  BadRequestException,
-  ConflictException,
-  NotFoundException,
-} from '@nestjs/common';
-import { Test, TestingModule } from '@nestjs/testing';
-import { PaymentStatus, PaymentType } from '@prisma/client';
-import { PrismaService } from '../../common/services/prisma.service';
-import { PaymentService } from '../../resources/payment/payment.service';
-import { ReservationService } from '../../resources/reservation/reservation.service';
+import { BadRequestException, NotFoundException } from "@nestjs/common";
+import { Test, TestingModule } from "@nestjs/testing";
+import { PaymentStatus, PaymentType } from "@prisma/client";
+import { Decimal } from "@prisma/client/runtime/library";
+import { PdfService } from "../../common/services/pdf.service";
+import { PrismaService } from "../../common/services/prisma.service";
+import { PaymentService } from "../../resources/payment/payment.service";
 
-describe('PaymentService', () => {
+describe("PaymentService", () => {
   let service: PaymentService;
-  let prismaService: PrismaService;
-  let reservationService: ReservationService;
+  let prismaService: any;
 
-  const mockPrismaService = {
-    payment: {
-      create: jest.fn(),
-      findMany: jest.fn(),
-      findUnique: jest.fn(),
-      findFirst: jest.fn(),
-      update: jest.fn(),
-      delete: jest.fn(),
-      count: jest.fn(),
-      groupBy: jest.fn(),
-      aggregate: jest.fn(),
-    },
-  };
-
-  const mockReservationService = {
-    findOne: jest.fn(),
-    confirm: jest.fn(),
-    cancel: jest.fn(),
+  const mockPdfService = {
+    generatePdf: jest.fn().mockResolvedValue(Buffer.from("fake-pdf")),
   };
 
   const mockPayment = {
-    id: 'payment-1',
-    amount: 50000, // 500.00 XOF
+    id: "payment-1",
+    amount: new Decimal(50000),
     type: PaymentType.ACOMPTE,
     status: PaymentStatus.PENDING,
-    reservationId: 'reservation-1',
-    userId: 'user-1',
-    paymentDate: new Date(),
-    description: 'Test payment',
-    user: {
-      id: 'user-1',
-      email: 'test@example.com',
-      firstName: 'John',
-      lastName: 'Doe',
-    },
-    reservation: {
-      id: 'reservation-1',
-      eventType: 'MARIAGE',
-      start: new Date(),
-      end: new Date(),
-      attendees: 100,
-    },
+    eventFolderId: "folder-1",
+    userId: "user-1",
+    dueDate: new Date(),
+    paidAt: null,
+    proofDocument: null,
+    isRefundable: false,
+    refundedAmount: null,
+    refundedAt: null,
+    createdBy: "admin-1",
+    updatedBy: null,
     createdAt: new Date(),
     updatedAt: new Date(),
+    eventFolder: {
+      id: "folder-1",
+      folderNumber: "EVT-2026-0001",
+      status: "QUOTED",
+      eventType: "MARIAGE",
+      start: new Date(),
+      end: new Date(),
+      totalTTC: new Decimal(500000),
+      user: {
+        id: "user-1",
+        email: "client@example.com",
+        firstName: "John",
+        lastName: "Doe",
+        phone: "+225070000000",
+      },
+    },
+    user: {
+      id: "user-1",
+      email: "client@example.com",
+      firstName: "John",
+      lastName: "Doe",
+    },
   };
 
-  const mockReservation = {
-    id: 'reservation-1',
-    userId: 'user-1',
-    eventType: 'MARIAGE',
-    start: new Date(),
-    end: new Date(),
-    attendees: 100,
-    status: 'PENDING',
+  const mockFolder = {
+    id: "folder-1",
+    userId: "user-1",
+    folderNumber: "EVT-2026-0001",
+    status: "QUOTED",
   };
 
   beforeEach(async () => {
+    const mockPrismaService = {
+      eventFolder: {
+        findUnique: jest.fn(),
+      },
+      payment: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+        delete: jest.fn(),
+        count: jest.fn(),
+        groupBy: jest.fn(),
+        aggregate: jest.fn(),
+      },
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentService,
@@ -79,410 +87,207 @@ describe('PaymentService', () => {
           useValue: mockPrismaService,
         },
         {
-          provide: ReservationService,
-          useValue: mockReservationService,
+          provide: PdfService,
+          useValue: mockPdfService,
         },
       ],
     }).compile();
 
     service = module.get<PaymentService>(PaymentService);
-    prismaService = module.get<PrismaService>(PrismaService);
-    reservationService = module.get<ReservationService>(ReservationService);
+    prismaService = module.get(PrismaService);
   });
 
   afterEach(() => {
     jest.clearAllMocks();
   });
 
-  describe('create', () => {
+  describe("create", () => {
     const createPaymentDto = {
       amount: 50000,
       type: PaymentType.ACOMPTE,
-      reservationId: 'reservation-1',
-      description: 'Test payment',
+      eventFolderId: "folder-1",
     };
+    const user = { id: "admin-1" };
 
-    const userId = 'user-1';
+    it("should create a payment successfully", async () => {
+      prismaService.eventFolder.findUnique.mockResolvedValue(mockFolder);
+      prismaService.payment.create.mockResolvedValue(mockPayment);
 
-    it('should create a payment successfully', async () => {
-      // Arrange
-      mockReservationService.findOne.mockResolvedValue(mockReservation);
-      mockPrismaService.payment.findFirst.mockResolvedValue(null); // No existing payment
-      mockPrismaService.payment.create.mockResolvedValue(mockPayment);
+      const result = await service.create(createPaymentDto, user);
 
-      // Act
-      const result = await service.create(createPaymentDto, userId);
-
-      // Assert
-      expect(mockReservationService.findOne).toHaveBeenCalledWith(
-        createPaymentDto.reservationId,
-      );
-      expect(mockPrismaService.payment.findFirst).toHaveBeenCalledWith({
-        where: {
-          reservationId: createPaymentDto.reservationId,
-          status: PaymentStatus.PAID,
-        },
+      expect(prismaService.eventFolder.findUnique).toHaveBeenCalledWith({
+        where: { id: "folder-1" },
       });
-      expect(mockPrismaService.payment.create).toHaveBeenCalledWith({
-        data: {
-          ...createPaymentDto,
-          userId,
-          status: PaymentStatus.PENDING,
-          paymentDate: expect.any(Date),
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              email: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
-          reservation: {
-            select: {
-              id: true,
-              eventType: true,
-              start: true,
-              end: true,
-              attendees: true,
-            },
-          },
-        },
-      });
+      expect(prismaService.payment.create).toHaveBeenCalled();
       expect(result).toEqual(mockPayment);
     });
 
-    it('should throw BadRequestException if reservation does not belong to user', async () => {
-      // Arrange
-      const differentUserReservation = {
-        ...mockReservation,
-        userId: 'different-user',
-      };
-      mockReservationService.findOne.mockResolvedValue(
-        differentUserReservation,
-      );
+    it("should throw NotFoundException if event folder not found", async () => {
+      prismaService.eventFolder.findUnique.mockResolvedValue(null);
 
-      // Act & Assert
-      await expect(service.create(createPaymentDto, userId)).rejects.toThrow(
-        BadRequestException,
-      );
-      expect(mockPrismaService.payment.create).not.toHaveBeenCalled();
-    });
-
-    it('should throw ConflictException if reservation already has a paid payment', async () => {
-      // Arrange
-      mockReservationService.findOne.mockResolvedValue(mockReservation);
-      const existingPayment = {
-        id: 'existing-payment',
-        status: PaymentStatus.PAID,
-      };
-      mockPrismaService.payment.findFirst.mockResolvedValue(existingPayment);
-
-      // Act & Assert
-      await expect(service.create(createPaymentDto, userId)).rejects.toThrow(
-        ConflictException,
-      );
-      expect(mockPrismaService.payment.create).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('findOne', () => {
-    it('should return a payment by id', async () => {
-      // Arrange
-      mockPrismaService.payment.findUnique.mockResolvedValue(mockPayment);
-
-      // Act
-      const result = await service.findOne('payment-1');
-
-      // Assert
-      expect(mockPrismaService.payment.findUnique).toHaveBeenCalledWith({
-        where: { id: 'payment-1' },
-        include: {
-          user: {
-            select: {
-              id: true,
-              email: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
-          reservation: {
-            select: {
-              id: true,
-              eventType: true,
-              start: true,
-              end: true,
-              attendees: true,
-              status: true,
-            },
-          },
-        },
-      });
-      expect(result).toEqual(mockPayment);
-    });
-
-    it('should throw NotFoundException if payment not found', async () => {
-      // Arrange
-      mockPrismaService.payment.findUnique.mockResolvedValue(null);
-
-      // Act & Assert
-      await expect(service.findOne('non-existent-id')).rejects.toThrow(
+      await expect(service.create(createPaymentDto, user)).rejects.toThrow(
         NotFoundException,
       );
     });
   });
 
-  describe('updateStatus', () => {
-    it('should update payment status to PAID and confirm reservation', async () => {
-      // Arrange
-      mockPrismaService.payment.findUnique.mockResolvedValue(mockPayment);
-      const updatedPayment = {
-        ...mockPayment,
-        status: PaymentStatus.PAID,
-      };
-      mockPrismaService.payment.update.mockResolvedValue(updatedPayment);
+  describe("findOne", () => {
+    it("should return a payment by id", async () => {
+      prismaService.payment.findUnique.mockResolvedValue(mockPayment);
 
-      // Act
-      const result = await service.updateStatus(
-        'payment-1',
-        PaymentStatus.PAID,
-      );
+      const result = await service.findOne("payment-1");
 
-      // Assert
-      expect(mockReservationService.confirm).toHaveBeenCalledWith(
-        mockPayment.reservationId,
+      expect(prismaService.payment.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "payment-1" },
+        }),
       );
-      expect(mockPrismaService.payment.update).toHaveBeenCalledWith({
-        where: { id: 'payment-1' },
-        data: {
-          status: PaymentStatus.PAID,
-          paymentDate: expect.any(Date),
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              email: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
-          reservation: {
-            select: {
-              id: true,
-              eventType: true,
-              start: true,
-              end: true,
-              attendees: true,
-            },
-          },
-        },
-      });
-      expect(result).toEqual(updatedPayment);
+      expect(result).toEqual(mockPayment);
     });
 
-    it('should not confirm reservation if payment was already paid', async () => {
-      // Arrange
-      const paidPayment = {
-        ...mockPayment,
-        status: PaymentStatus.PAID,
-      };
-      mockPrismaService.payment.findUnique.mockResolvedValue(paidPayment);
-      mockPrismaService.payment.update.mockResolvedValue(paidPayment);
+    it("should throw NotFoundException if payment not found", async () => {
+      prismaService.payment.findUnique.mockResolvedValue(null);
 
-      // Act
-      await service.updateStatus('payment-1', PaymentStatus.PAID);
-
-      // Assert
-      expect(mockReservationService.confirm).not.toHaveBeenCalled();
+      await expect(service.findOne("non-existent-id")).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
-  describe('markAsPaid', () => {
-    it('should mark payment as paid', async () => {
-      // Arrange
-      mockPrismaService.payment.findUnique.mockResolvedValue(mockPayment);
+  describe("findAll", () => {
+    it("should return paginated payments", async () => {
+      prismaService.payment.findMany.mockResolvedValue([mockPayment]);
+      prismaService.payment.count.mockResolvedValue(1);
+
+      const result = await service.findAll();
+
+      expect(result).toEqual({ data: [mockPayment], total: 1 });
+    });
+
+    it("should filter by status", async () => {
+      prismaService.payment.findMany.mockResolvedValue([]);
+      prismaService.payment.count.mockResolvedValue(0);
+
+      await service.findAll({ status: PaymentStatus.PENDING });
+
+      expect(prismaService.payment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ status: PaymentStatus.PENDING }),
+        }),
+      );
+    });
+  });
+
+  describe("markAsPaid", () => {
+    it("should mark payment as paid", async () => {
+      prismaService.payment.findUnique.mockResolvedValue(mockPayment);
       const paidPayment = {
         ...mockPayment,
         status: PaymentStatus.PAID,
+        paidAt: new Date(),
       };
-      mockPrismaService.payment.update.mockResolvedValue(paidPayment);
+      prismaService.payment.update.mockResolvedValue(paidPayment);
 
-      // Act
-      const result = await service.markAsPaid('payment-1');
+      const result = await service.markAsPaid("payment-1");
 
-      // Assert
+      expect(prismaService.payment.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "payment-1" },
+          data: expect.objectContaining({
+            status: PaymentStatus.PAID,
+          }),
+        }),
+      );
       expect(result.status).toBe(PaymentStatus.PAID);
     });
-  });
 
-  describe('markAsFailed', () => {
-    it('should mark payment as failed', async () => {
-      // Arrange
-      mockPrismaService.payment.findUnique.mockResolvedValue(mockPayment);
-      const failedPayment = {
-        ...mockPayment,
-        status: PaymentStatus.PENDING, // Utilisons un statut valide
-      };
-      mockPrismaService.payment.update.mockResolvedValue(failedPayment);
+    it("should throw BadRequestException if already paid", async () => {
+      const paidPayment = { ...mockPayment, status: PaymentStatus.PAID };
+      prismaService.payment.findUnique.mockResolvedValue(paidPayment);
 
-      // Act
-      const result = await service.markAsFailed('payment-1');
-
-      // Assert
-      expect(result.status).toBe(PaymentStatus.PENDING);
+      await expect(service.markAsPaid("payment-1")).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
-  describe('refund', () => {
-    it('should refund a paid payment', async () => {
-      // Arrange
-      const paidPayment = {
-        ...mockPayment,
-        status: PaymentStatus.PAID,
-      };
-      mockPrismaService.payment.findUnique.mockResolvedValue(paidPayment);
+  describe("refund", () => {
+    it("should refund a paid payment", async () => {
+      const paidPayment = { ...mockPayment, status: PaymentStatus.PAID };
+      prismaService.payment.findUnique.mockResolvedValue(paidPayment);
       const refundedPayment = {
         ...mockPayment,
         status: PaymentStatus.REFUNDED,
       };
-      mockPrismaService.payment.update.mockResolvedValue(refundedPayment);
+      prismaService.payment.update.mockResolvedValue(refundedPayment);
 
-      // Act
-      const result = await service.refund('payment-1');
+      const result = await service.refund("payment-1");
 
-      // Assert
-      expect(mockReservationService.cancel).toHaveBeenCalledWith(
-        paidPayment.reservationId,
-      );
       expect(result.status).toBe(PaymentStatus.REFUNDED);
     });
 
-    it('should throw BadRequestException if payment is not paid', async () => {
-      // Arrange
-      const pendingPayment = {
-        ...mockPayment,
-        status: PaymentStatus.PENDING,
-      };
-      mockPrismaService.payment.findUnique.mockResolvedValue(pendingPayment);
+    it("should throw BadRequestException if payment is not paid", async () => {
+      prismaService.payment.findUnique.mockResolvedValue(mockPayment); // PENDING
 
-      // Act & Assert
-      await expect(service.refund('payment-1')).rejects.toThrow(
+      await expect(service.refund("payment-1")).rejects.toThrow(
         BadRequestException,
       );
-      expect(mockReservationService.cancel).not.toHaveBeenCalled();
     });
   });
 
-  describe('remove', () => {
-    it('should remove a non-paid payment', async () => {
-      // Arrange
-      const pendingPayment = {
-        ...mockPayment,
-        status: PaymentStatus.PENDING,
-      };
-      mockPrismaService.payment.findUnique.mockResolvedValue(pendingPayment);
-      mockPrismaService.payment.delete.mockResolvedValue(pendingPayment);
+  describe("remove", () => {
+    it("should remove a pending payment", async () => {
+      prismaService.payment.findUnique.mockResolvedValue(mockPayment);
+      prismaService.payment.delete.mockResolvedValue(mockPayment);
 
-      // Act
-      await service.remove('payment-1');
+      await service.remove("payment-1");
 
-      // Assert
-      expect(mockPrismaService.payment.delete).toHaveBeenCalledWith({
-        where: { id: 'payment-1' },
+      expect(prismaService.payment.delete).toHaveBeenCalledWith({
+        where: { id: "payment-1" },
       });
     });
 
-    it('should throw BadRequestException if trying to remove a paid payment', async () => {
-      // Arrange
-      const paidPayment = {
-        ...mockPayment,
-        status: PaymentStatus.PAID,
-      };
-      mockPrismaService.payment.findUnique.mockResolvedValue(paidPayment);
+    it("should throw BadRequestException if trying to remove a paid payment", async () => {
+      const paidPayment = { ...mockPayment, status: PaymentStatus.PAID };
+      prismaService.payment.findUnique.mockResolvedValue(paidPayment);
 
-      // Act & Assert
-      await expect(service.remove('payment-1')).rejects.toThrow(
+      await expect(service.remove("payment-1")).rejects.toThrow(
         BadRequestException,
       );
-      expect(mockPrismaService.payment.delete).not.toHaveBeenCalled();
     });
   });
 
-  describe('processPayment', () => {
-    it('should process a pending payment successfully', async () => {
-      // Arrange
-      const pendingPayment = {
-        ...mockPayment,
-        status: PaymentStatus.PENDING,
-      };
-      mockPrismaService.payment.findUnique.mockResolvedValue(pendingPayment);
-      const paidPayment = {
-        ...mockPayment,
-        status: PaymentStatus.PAID,
-      };
-      mockPrismaService.payment.update.mockResolvedValue(paidPayment);
-
-      // Act
-      const result = await service.processPayment('payment-1', {
-        method: 'card',
+  describe("getStats", () => {
+    it("should return payment statistics", async () => {
+      prismaService.payment.groupBy.mockResolvedValue([
+        {
+          status: PaymentStatus.PAID,
+          _count: { _all: 5 },
+          _sum: { amount: new Decimal(250000) },
+        },
+      ]);
+      prismaService.payment.aggregate.mockResolvedValue({
+        _sum: { amount: new Decimal(250000) },
+        _count: { _all: 5 },
       });
 
-      // Assert
-      expect(result.status).toBe(PaymentStatus.PAID);
-    });
+      const result = await service.getStats();
 
-    it('should throw BadRequestException if payment is not pending', async () => {
-      // Arrange
-      const paidPayment = {
-        ...mockPayment,
-        status: PaymentStatus.PAID,
-      };
-      mockPrismaService.payment.findUnique.mockResolvedValue(paidPayment);
-
-      // Act & Assert
-      await expect(
-        service.processPayment('payment-1', { method: 'card' }),
-      ).rejects.toThrow(BadRequestException);
+      expect(result).toHaveProperty("byStatus");
+      expect(result).toHaveProperty("totalRevenue");
+      expect(result).toHaveProperty("currentMonthRevenue");
     });
   });
 
-  describe('createInvoice', () => {
-    it('should create invoice for paid payment', async () => {
-      // Arrange
-      const paidPayment = {
-        ...mockPayment,
-        status: PaymentStatus.PAID,
-      };
-      mockPrismaService.payment.findUnique.mockResolvedValue(paidPayment);
+  describe("generateInvoicePdf", () => {
+    it("should generate a PDF invoice", async () => {
+      prismaService.payment.findUnique.mockResolvedValue(mockPayment);
+      mockPdfService.generatePdf.mockResolvedValue(Buffer.from("pdf-content"));
 
-      // Act
-      const result = await service.createInvoice('payment-1');
+      const result = await service.generateInvoicePdf("payment-1");
 
-      // Assert
-      expect(result).toEqual({
-        id: `INV-${paidPayment.id}`,
-        paymentId: paidPayment.id,
-        amount: paidPayment.amount,
-        date: paidPayment.paymentDate,
-        customer: paidPayment.user,
-        reservation: paidPayment.reservation,
-      });
-    });
-
-    it('should throw BadRequestException if payment is not paid', async () => {
-      // Arrange
-      const pendingPayment = {
-        ...mockPayment,
-        status: PaymentStatus.PENDING,
-      };
-      mockPrismaService.payment.findUnique.mockResolvedValue(pendingPayment);
-
-      // Act & Assert
-      await expect(service.createInvoice('payment-1')).rejects.toThrow(
-        BadRequestException,
-      );
+      expect(mockPdfService.generatePdf).toHaveBeenCalled();
+      expect(result).toBeInstanceOf(Buffer);
     });
   });
 });

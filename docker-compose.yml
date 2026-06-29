@@ -1,89 +1,80 @@
 version: "3.8"
 
 services:
-  # ====================================
-  # Database PostgreSQL
-  # ====================================
+  # ============================================
+  # PostgreSQL - Base de données
+  # ============================================
   postgres:
     image: postgres:15-alpine
-    container_name: pavillon-postgres
+    container_name: pavillon_db_${ENV_SUFFIX}
     restart: unless-stopped
     environment:
-      POSTGRES_DB: pavillon_les_lys
-      POSTGRES_USER: pavillon_user
-      POSTGRES_PASSWORD: "Str0ngLysP@ssword="
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # Bind sur un port hôte différent du Postgres système (qui occupe déjà 5432)
     ports:
-      - "5434:5432" # host:container
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
     networks:
-      - pavillon-network
+      - pavillon_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pavillon_user -d pavillon_les_lys"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # ====================================
-  # Redis pour le cache et les sessions
-  # ====================================
-  redis:
-    image: redis:7-alpine
-    container_name: pavillon-redis
-    restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass redis_pwd_2025
-    volumes:
-      - redis_data:/data
-    ports:
-      - "6380:6379"
-    networks:
-      - pavillon-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ====================================
-  # API Application - Image du Hub
-  # ====================================
+  # ============================================
+  # NestJS API
+  # ============================================
   api:
     image: kysaymeric/pavillon-les-lys:${IMAGE_TAG:-latest}
-    container_name: pavillon-api
+    container_name: pavillon_api_${ENV_SUFFIX}
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
     environment:
-      # ⚠️ Si ton mot de passe Postgres contient des caractères spéciaux (@, =),
-      # utilise une URL ENCODÉE, ex: %40 pour @, %3D pour =
-      # Exemple encodé: Str0ngLysP%40ssword%3D
-      DATABASE_URL: "postgresql://pavillon_user:Str0ngLysP%40ssword%3D@postgres:5432/pavillon_les_lys"
-      REDIS_URL: "redis://:redis_pwd_2025@redis:6379"
-      JWT_SECRET: supersecretjwtkey_change_me
-      JWT_EXPIRES_IN: 24h
-      NODE_ENV: production
-      PORT: 3000
-      # Email Configuration (Gmail SMTP)
-      SMTP_USER: stephanek1996@gmail.com
-      SMTP_PASSWORD: bgeq dttf nidb fhag
-      FRONTEND_URL: http://localhost:3001
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${PORT:-4000}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-${JWT_SECRET}}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-${JWT_SECRET}}
+      JWT_ACCESS_EXPIRATION_MINUTES: ${JWT_ACCESS_EXPIRATION_MINUTES:-15}
+      JWT_REFRESH_EXPIRATION_DAYS: ${JWT_REFRESH_EXPIRATION_DAYS:-30}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
+      MAIL_HOST: ${MAIL_HOST}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USER: ${MAIL_USER}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
+      MAIL_FROM: ${MAIL_FROM}
+      FRONTEND_URL: ${FRONTEND_URL:-https://www.pavillonleslys.com}
+      BACKOFFICE_URL: ${BACKOFFICE_URL:-https://backoffice.pavillonleslys.com}
+      FRONTOFFICE_URL: ${FRONTOFFICE_URL:-https://www.pavillonleslys.com}
+      BCRYPT_ROUNDS: ${BCRYPT_SALT_ROUNDS:-12}
+      CAUTION_AMOUNT: ${CAUTION_AMOUNT:-100000}
+    volumes:
+      - uploads_data:/app/uploads
     ports:
-      - "3000:3000"
+      - "${PORT:-4000}:${PORT:-4000}"
     networks:
-      - pavillon-network
+      - pavillon_network
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${PORT:-4000}/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 volumes:
   postgres_data:
-  redis_data:
+    name: pavillon_postgres_data_${ENV_SUFFIX}
+  uploads_data:
+    name: pavillon_uploads_data_${ENV_SUFFIX}
 
 networks:
-  pavillon-network:
+  pavillon_network:
+    name: pavillon_network_${ENV_SUFFIX}
     driver: bridge

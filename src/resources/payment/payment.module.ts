@@ -1,17 +1,17 @@
-import { Module } from '@nestjs/common';
-import { PrismaService } from '../../common/services/prisma.service';
-import { ReservationModule } from '../reservation/reservation.module';
-import { UserModule } from '../user/user.module';
-import { PaymentController } from './payment.controller';
-import { PaymentService } from './payment.service';
+import { Module } from "@nestjs/common";
+import { PdfService } from "../../common/services/pdf.service";
+import { PrismaService } from "../../common/services/prisma.service";
+import { MailModule } from "../../mail/mail.module";
+import { AuditLogModule } from "../audit-log/audit-log.module";
+import { EventFolderModule } from "../event-folder/event-folder.module";
+import { UserModule } from "../user/user.module";
+import { PaymentController } from "./payment.controller";
+import { PaymentService } from "./payment.service";
 
 @Module({
-  imports: [
-    UserModule, // Pour accéder au UserService
-    ReservationModule, // Pour accéder au ReservationService
-  ],
+  imports: [UserModule, AuditLogModule, MailModule, EventFolderModule],
   controllers: [PaymentController],
-  providers: [PaymentService, PrismaService],
-  exports: [PaymentService], // Exporter pour utilisation dans d'autres modules
+  providers: [PaymentService, PrismaService, PdfService],
+  exports: [PaymentService],
 })
 export class PaymentModule {}

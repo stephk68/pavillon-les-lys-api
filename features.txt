@@ -1,0 +1,15 @@
+🛠️ Mes Points de Vigilance (Critiques Constructives)
+Bien que l'implémentation soit solide, voici quelques points qui méritent ton attention pour la mise en production :
+
+Swagger/OpenAPI : Il est noté comme "TODO". Pour ton équipe front-end (Next.js), c'est une priorité absolue pour éviter les frictions sur les 78 endpoints.
+
+Sécurité (Rate Limiting) : Toujours en "TODO". Avec un site de luxe, tu ne veux pas qu'un bot sature ton service de mails ou de génération PDF.
+
+Audit Log : Tu as ajouté des champs d'audit, mais assure-toi d'avoir un middleware qui enregistre qui a changé le statut d'un dossier (ex: passer de QUOTED à BOOKED manuellement).
+
+Petite typo détectée : Dans ta structure de fichiers, tu as chekclist-item/ (une inversion du 'k' et du 'c'). C'est mineur, mais à corriger avant que la base de code ne grandisse trop !
+
+🎯 Conclusion
+L'état actuel de l'API est très satisfaisant. Elle est robuste, orientée métier et parfaitement alignée avec le standing du Pavillon Les Lys. Tu as réussi à transformer une complexité technique en une fluidité opérationnelle.
+
+Souhaites-tu que je t'aide à rédiger la configuration du Rate Limiting ou à finaliser le template pour le Password Reset afin de clore ces points en suspens ?

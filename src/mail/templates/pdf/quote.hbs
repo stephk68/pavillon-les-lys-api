@@ -1,0 +1,480 @@
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@300;400;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: Georgia, "Times New Roman", serif;
+        background-color: #fdfaf5;
+        color: #1a1a1a;
+        line-height: 1.55;
+        font-size: 12.5px;
+      }
+      .sheet {
+        position: relative;
+        min-height: 277mm;
+        padding: 0 8mm 26mm;
+        page-break-after: always;
+      }
+      .sheet:last-child {
+        page-break-after: auto;
+      }
+
+      /* Header */
+      .doc-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        padding: 6px 0 18px;
+        border-bottom: 2px solid #b89140;
+        margin-bottom: 18px;
+      }
+      .logo {
+        font-family: "Playfair Display", Georgia, serif;
+        color: #b89140;
+        font-size: 22px;
+        letter-spacing: 0.22em;
+        font-weight: 400;
+      }
+      .logo-sub {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        color: #a97c50;
+        margin-top: 5px;
+      }
+      .doc-meta {
+        text-align: right;
+        font-size: 11px;
+        color: #555;
+        line-height: 1.7;
+      }
+      .doc-meta .doc-title {
+        font-family: "Playfair Display", Georgia, serif;
+        color: #b89140;
+        font-size: 16px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 4px;
+      }
+
+      /* Title line */
+      .quote-title {
+        font-family: "Playfair Display", Georgia, serif;
+        font-size: 14px;
+        color: #1a1a1a;
+        margin-bottom: 16px;
+      }
+      .quote-title strong {
+        color: #b89140;
+      }
+
+      /* Sender / recipient */
+      .parties {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 22px;
+      }
+      .parties td {
+        vertical-align: top;
+        width: 50%;
+        font-size: 12px;
+        padding: 0 14px 0 0;
+      }
+      .parties td:last-child {
+        padding-right: 0;
+        text-align: right;
+      }
+      .box-title {
+        font-size: 9.5px;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        color: #a97c50;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+      .parties p {
+        margin: 0 0 3px;
+      }
+
+      /* Items table */
+      table.items {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 18px;
+      }
+      table.items th {
+        background-color: #1a1a1a;
+        color: #f3d9a0;
+        text-align: left;
+        padding: 9px 14px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        font-weight: 600;
+      }
+      table.items th:last-child {
+        text-align: right;
+      }
+      table.items td {
+        padding: 8px 14px;
+        border-bottom: 1px solid rgba(201, 161, 74, 0.18);
+        font-size: 12.5px;
+        color: #1a1a1a;
+      }
+      table.items td:last-child {
+        text-align: right;
+        white-space: nowrap;
+      }
+      table.items tr:last-child td {
+        border-bottom: none;
+      }
+
+      /* Totals */
+      .totals {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 8px;
+      }
+      .totals-box {
+        width: 320px;
+      }
+      .discount-line {
+        display: flex;
+        justify-content: space-between;
+        padding: 6px 0;
+        font-size: 12px;
+        font-style: italic;
+        color: #9a6b3a;
+      }
+      .grand-line {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        border-top: 2px solid #b89140;
+        margin-top: 4px;
+        padding-top: 10px;
+        font-size: 16px;
+        font-weight: 700;
+        color: #b89140;
+        font-family: "Playfair Display", Georgia, serif;
+      }
+      .discount-note {
+        font-size: 10.5px;
+        font-style: italic;
+        color: #9a6b3a;
+        margin-top: 4px;
+      }
+
+      /* Conditions pages */
+      .section-title {
+        font-family: "Playfair Display", Georgia, serif;
+        font-size: 14px;
+        font-weight: 600;
+        color: #1a1a1a;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        border-left: 4px solid #b89140;
+        padding-left: 12px;
+        margin: 4px 0 14px;
+      }
+      .rules {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      .rules li {
+        position: relative;
+        padding: 5px 0 5px 20px;
+        font-size: 12px;
+        border-bottom: 1px solid rgba(201, 161, 74, 0.1);
+      }
+      .rules li::before {
+        content: "▪";
+        color: #b89140;
+        position: absolute;
+        left: 4px;
+      }
+      .cond-block {
+        margin-bottom: 16px;
+      }
+      .cond-block h3 {
+        font-size: 12.5px;
+        color: #1a1a1a;
+        margin-bottom: 6px;
+      }
+      .cond-block ul {
+        margin: 0 0 0 18px;
+        font-size: 12px;
+      }
+      .cond-block li {
+        margin-bottom: 4px;
+      }
+      .highlight {
+        background: #f5f0e8;
+        border-left: 4px solid #b89140;
+        padding: 12px 16px;
+        margin: 16px 0;
+        font-size: 12px;
+      }
+      .nb {
+        font-weight: 700;
+        color: #9a2b2b;
+        margin-top: 10px;
+      }
+
+      /* Signature */
+      .signatures {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 40px;
+      }
+      .sig {
+        width: 240px;
+        text-align: center;
+      }
+      .sig .who {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: #555;
+        margin-bottom: 50px;
+      }
+      .sig .line {
+        border-top: 1px solid #999;
+        padding-top: 6px;
+        font-size: 10px;
+        color: #888;
+      }
+      .ceremony-date {
+        margin-top: 28px;
+        font-size: 12px;
+        font-style: italic;
+        color: #555;
+      }
+
+      /* Legal footer (répété sur chaque page) */
+      .legal-footer {
+        position: absolute;
+        bottom: 8mm;
+        left: 8mm;
+        right: 8mm;
+        border-top: 1px solid rgba(201, 161, 74, 0.3);
+        padding-top: 8px;
+        text-align: center;
+        font-size: 8.5px;
+        color: #9a7c50;
+        line-height: 1.5;
+      }
+      .legal-footer strong {
+        color: #b89140;
+      }
+    </style>
+  </head>
+  <body>
+
+    <!-- ───────────── PAGE 1 : DEVIS ───────────── -->
+    <section class="sheet">
+      <div class="doc-header">
+        <div>
+          <div class="logo">PAVILLON LES LYS</div>
+          <div class="logo-sub">Espace Événementiel</div>
+        </div>
+        <div class="doc-meta">
+          <div class="doc-title">Devis — Facture</div>
+          Référence
+          <strong>{{number}}</strong><br />
+          Le
+          {{date}}
+        </div>
+      </div>
+
+      <div class="quote-title">
+        Devis, facture :
+        <strong>{{eventTypeLabel}}</strong>
+        /
+        {{eventPeriod}}
+        /
+        {{attendees}}
+        personnes
+      </div>
+
+      <table class="parties">
+        <tr>
+          <td>
+            <div class="box-title">Pavillon Les Lys</div>
+            <p>Cocody Riviera Bonoumin</p>
+            <p>07 16 311 211</p>
+            <p>pavillonleslys@gmail.com</p>
+            <p>Le {{date}}</p>
+          </td>
+          <td>
+            <div class="box-title">À l'attention de</div>
+            <p>{{client.name}}</p>
+            {{#if client.phone}}<p>{{client.phone}}</p>{{/if}}
+          </td>
+        </tr>
+      </table>
+
+      <table class="items">
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th>Quantité</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{#each items}}
+            <tr>
+              <td>{{description}}</td>
+              <td style="text-align:right;">{{quantity}}</td>
+            </tr>
+          {{/each}}
+        </tbody>
+      </table>
+
+      <div class="totals">
+        <div class="totals-box">
+          {{#if hasDiscount}}
+            <div class="discount-line">
+              <span>Remise exceptionnelle</span>
+              <span>− {{formatXOF discountAmount}}</span>
+            </div>
+          {{/if}}
+          <div class="grand-line">
+            <span>TOTAL</span>
+            <span>{{formatXOF total}}</span>
+          </div>
+        </div>
+      </div>
+      {{#if hasDiscount}}
+        <div class="discount-note">
+          (*) Remise exceptionnelle de
+          {{formatXOF discountAmount}}{{#if discountReason}}
+            —
+            {{discountReason}}{{/if}}.
+        </div>
+      {{/if}}
+
+      <div class="legal-footer">
+        <strong>SARL GINA PRESTATIONS (Pavillon les lys)</strong>
+        – RCCM : CI-ABJ-03-2023-B-13-07467 – Capital : 5 000 000 FCFA – RI :
+        Réel Simplifié – CC 2303202 J – Cocody Bonoumin – Compte bancaire
+        CI1210130103414580020155 – TEL : +225 07 16 311 211 –
+        Pavillonleslys@gmail.com – www.pavillonleslys.com
+      </div>
+    </section>
+
+    <!-- ───────────── PAGE 2 : À LIRE OBLIGATOIREMENT ───────────── -->
+    <section class="sheet">
+      <div class="section-title">À lire obligatoirement</div>
+      <ul class="rules">
+        <li>Ne pas coller tout support sur le sol.</li>
+        <li>Il est interdit de cuisiner sur le site et aux alentours. Les feux
+          de bois, charbons et les bouteilles de gaz sont interdits.</li>
+        <li>Ne pas dépasser la capacité d'accueil maximale des lieux.</li>
+        <li>Le maximum acceptable pour la salle sera de 350 personnes.</li>
+        <li>Toute demande de rajout devra être signalée pour la facturation à
+          raison de 75 000 FCFA / table.</li>
+        <li>Il est interdit de faire une installation supplémentaire non prévue
+          au contrat. Tout dépassement sera facturé à 7 500 F / nombre d'invités
+          supplémentaires.</li>
+        <li>Ne pas agrafer des éléments sur la toile.</li>
+        <li>Ne pas déposer des robots sur les armoires de climatisation.</li>
+        <li>Verser une caution remboursable de
+          {{formatXOF cautionAmount}}
+          pour couvrir tout dommage sur le matériel ou les installations. Ce
+          montant sera payé 72 heures avant le début de l'événement. Après
+          vérification par notre équipe, la caution sera intégralement
+          remboursée si aucun dommage n'est constaté. En cas de casse ou de
+          perte, le montant correspondant à la valeur des articles endommagés
+          sera déduit de la caution.</li>
+        <li>La location est d'une durée de 12 heures (6 heures pour la mise en
+          place et 6 heures pour l'événement).</li>
+        <li>La date du début de l'événement devra être précisée par écrit sur le
+          contrat lors du règlement pour une bonne organisation.</li>
+        <li>L'espace est disponible à partir de 6h00 le jour de l'événement.</li>
+        <li>Pendant la mise en place et la décoration de l'espace, les
+          climatiseurs ne seront pas en marche. Seule l'administration du
+          Pavillon Les Lys est habilitée à mettre en marche les climatiseurs
+          pour rafraîchir la salle avant le début de l'événement (1h avant).</li>
+        <li>En cas de dépassement de la durée de location, une pénalité de 100
+          000 FCFA par heure sera appliquée.</li>
+      </ul>
+
+      <div class="legal-footer">
+        <strong>SARL GINA PRESTATIONS (Pavillon les lys)</strong>
+        – RCCM : CI-ABJ-03-2023-B-13-07467 – Capital : 5 000 000 FCFA – RI :
+        Réel Simplifié – CC 2303202 J – Cocody Bonoumin – Compte bancaire
+        CI1210130103414580020155 – TEL : +225 07 16 311 211 –
+        Pavillonleslys@gmail.com – www.pavillonleslys.com
+      </div>
+    </section>
+
+    <!-- ───────────── PAGE 3 : CONDITIONS + SIGNATURE ───────────── -->
+    <section class="sheet">
+      <div class="section-title">Conditions</div>
+
+      <div class="cond-block">
+        <h3>Condition de paiement</h3>
+        <ul>
+          <li>Verser un acompte de 50% à la signature du contrat, et solder le
+            reste à 2 semaines de l'évènement.</li>
+        </ul>
+      </div>
+
+      <div class="cond-block">
+        <h3>Condition d'annulation</h3>
+        <ul>
+          <li>Si l'annulation intervient plus de 45 jours avant la date de
+            l'événement, l'acompte versé sera remboursé.</li>
+          <li>Si l'annulation intervient moins de 45 jours avant la date de
+            l'événement, l'acompte ne sera pas remboursé.</li>
+          <li>En cas d'annulation par le Prestataire pour des raisons techniques
+            ou de force majeure, la totalité des sommes versées par le Client
+            sera remboursée.</li>
+        </ul>
+      </div>
+
+      <div class="highlight">
+        Cette facture tient lieu également de contrat. Il convient de bien lire
+        les termes avant de signer et procéder à la réservation.
+        <div class="nb">NB : Pas de réservation sans avance.</div>
+      </div>
+
+      {{#if includeSignature}}
+        <div class="signatures">
+          <div class="sig">
+            <div class="who">Le représentant Pavillon Les Lys</div>
+            <div class="line">Signature</div>
+          </div>
+          <div class="sig">
+            <div class="who">Le client</div>
+            <div class="line">Signature</div>
+          </div>
+        </div>
+        <div class="ceremony-date">Date de début de la cérémonie :
+          _______________________</div>
+      {{/if}}
+
+      <div class="legal-footer">
+        <strong>SARL GINA PRESTATIONS (Pavillon les lys)</strong>
+        – RCCM : CI-ABJ-03-2023-B-13-07467 – Capital : 5 000 000 FCFA – RI :
+        Réel Simplifié – CC 2303202 J – Cocody Bonoumin – Compte bancaire
+        CI1210130103414580020155 – TEL : +225 07 16 311 211 –
+        Pavillonleslys@gmail.com – www.pavillonleslys.com
+      </div>
+    </section>
+
+  </body>
+</html>

@@ -1,0 +1,232 @@
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #f5f0e8;
+        font-family: Georgia, "Times New Roman", serif;
+      }
+      .wrapper {
+        background-color: #f5f0e8;
+        padding: 40px 20px;
+      }
+      .container {
+        max-width: 700px;
+        margin: 0 auto;
+        background-color: #fdfaf5;
+        border: 1px solid rgba(201, 161, 74, 0.15);
+        border-radius: 0;
+        overflow: hidden;
+        border-top: 2px solid #b89140;
+      }
+      .doc-header {
+        padding: 30px 40px;
+        border-bottom: 2px solid #b89140;
+      }
+      .doc-header table {
+        width: 100%;
+      }
+      .doc-header .logo {
+        font-family: "Playfair Display", Georgia, serif;
+        font-weight: 300;
+        color: #b89140;
+        font-size: 22px;
+        letter-spacing: 0.25em;
+      }
+      .doc-header .doc-title {
+        text-align: right;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        color: #a97c50;
+        line-height: 1.6;
+      }
+      .doc-header .doc-title strong {
+        color: #000000;
+        font-size: 13px;
+        display: block;
+        margin-top: 4px;
+      }
+      .content {
+        padding: 30px 40px;
+      }
+      .section-title {
+        font-family: "Playfair Display", Georgia, serif;
+        font-size: 13px;
+        font-weight: 600;
+        color: #000000;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        border-left: 4px solid #b89140;
+        padding-left: 12px;
+        margin: 30px 0 15px;
+      }
+      .section-title:first-child {
+        margin-top: 0;
+      }
+      .info-grid {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .info-grid td {
+        vertical-align: top;
+        padding: 0 10px;
+        width: 50%;
+      }
+      .info-item {
+        font-size: 13px;
+        line-height: 1.8;
+        color: #000000;
+      }
+      .info-item .label {
+        color: #a97c50;
+        font-weight: 600;
+      }
+      table.items {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 15px 0;
+      }
+      table.items th {
+        background-color: #b89140;
+        color: #fdfaf5;
+        text-align: left;
+        padding: 12px 14px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        font-weight: 500;
+      }
+      table.items td {
+        padding: 12px 14px;
+        border-bottom: 1px solid rgba(201, 161, 74, 0.12);
+        font-size: 13px;
+        color: #000000;
+      }
+      table.items tr.total-row td {
+        background: #f5f0e8;
+        font-weight: 500;
+        font-size: 15px;
+        border-bottom: none;
+      }
+      table.items tr.total-row td.total-amount {
+        color: #b89140;
+      }
+      .payment-terms {
+        font-size: 13px;
+        line-height: 1.8;
+        color: #000000;
+      }
+      .payment-terms strong {
+        color: #000000;
+      }
+      .divider {
+        height: 1px;
+        background-color: rgba(201, 161, 74, 0.2);
+        margin: 30px 0;
+      }
+      .footer {
+        text-align: center;
+        padding: 20px 40px;
+        border-top: 1px solid rgba(201, 161, 74, 0.12);
+      }
+      .footer p {
+        font-size: 11px;
+        color: #a97c50;
+        margin: 0;
+        line-height: 1.6;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrapper">
+      <div class="container">
+        <div class="doc-header">
+          <table>
+            <tr>
+              <td class="logo">PAVILLON LES LYS</td>
+              <td class="doc-title">
+                Dossier Événement<br />
+                <strong>{{folderNumber}}</strong>
+              </td>
+            </tr>
+          </table>
+        </div>
+
+        <div class="content">
+          <table class="info-grid">
+            <tr>
+              <td>
+                <div class="section-title">Informations Client</div>
+                <div class="info-item">
+                  <span class="label">Nom :</span>
+                  {{clientName}}<br />
+                  <span class="label">Téléphone :</span>
+                  {{clientPhone}}<br />
+                  <span class="label">Email :</span>
+                  {{clientEmail}}
+                </div>
+              </td>
+              <td>
+                <div class="section-title">Détails de l'Événement</div>
+                <div class="info-item">
+                  <span class="label">Type :</span>
+                  {{eventType}}<br />
+                  <span class="label">Date :</span>
+                  {{eventDate}}<br />
+                  <span class="label">Nombre d'invités :</span>
+                  {{guestCount}}
+                </div>
+              </td>
+            </tr>
+          </table>
+
+          <div class="section-title">Prestations & Devis</div>
+          <table class="items">
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th>Quantité</th>
+                <th>Prix Unitaire</th>
+                <th>Total HT</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{#each items}}
+                <tr>
+                  <td>{{description}}</td>
+                  <td>{{quantity}}</td>
+                  <td>{{unitPrice}} FCFA</td>
+                  <td>{{totalPrice}} FCFA</td>
+                </tr>
+              {{/each}}
+              <tr class="total-row">
+                <td colspan="3" style="text-align: right;">TOTAL TTC</td>
+                <td class="total-amount">{{totalTTC}} FCFA</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="section-title">Modalités de Paiement</div>
+          <div class="payment-terms">
+            Acompte (50%) :
+            <strong>{{depositAmount}} FCFA</strong><br />
+            Solde (50%) :
+            <strong>{{balanceAmount}} FCFA</strong>
+            (à régler à J-14)<br />
+            Caution :
+            <strong>{{cautionAmount}} FCFA</strong>
+          </div>
+        </div>
+
+        <div class="footer">
+          <p>Pavillon Les Lys — Riviera Palmeraie, Proximité Abidjan Mall —
+            Abidjan, Côte d'Ivoire</p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
