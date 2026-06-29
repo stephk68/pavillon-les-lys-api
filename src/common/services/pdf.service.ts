@@ -141,26 +141,6 @@ export class PdfService {
     });
   }
 
-  async generateContractPdf(data: {
-    folderNumber: string;
-    clientName: string;
-    clientEmail: string;
-    clientPhone: string;
-    eventType: string;
-    attendees: number;
-    schedules: string;
-    totalTTC: number;
-    depositAmount: number;
-    cautionAmount: number;
-    date: string;
-  }): Promise<Buffer> {
-    const html = this.renderTemplate("pdf/contract", data);
-    return this.generatePdf(html, {
-      format: "A4",
-      margin: { top: "15mm", right: "15mm", bottom: "15mm", left: "15mm" },
-    });
-  }
-
   /**
    * Compile et rend un template Handlebars depuis src/mail/templates/
    */

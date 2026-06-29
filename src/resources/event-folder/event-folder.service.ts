@@ -497,7 +497,9 @@ export class EventFolderService {
     if (pricingChanged) {
       const itemsForSum = (dto.items ?? folder.items).map((i) => ({
         quantity: i.quantity,
-        unitPrice: Number((i as { unitPrice?: number | string }).unitPrice ?? 0),
+        unitPrice: Number(
+          (i as { unitPrice?: number | string }).unitPrice ?? 0,
+        ),
       }));
       const totals = this.calculateTotals(itemsForSum, {
         totalAmount:
@@ -710,7 +712,7 @@ export class EventFolderService {
     updatedBy?: string,
   ) {
     const folder = await this.findOne(id);
-    const currentStatus = folder.status as EventStatus;
+    const currentStatus = folder.status;
 
     // Validate transition
     const allowedTargets = VALID_TRANSITIONS[currentStatus];

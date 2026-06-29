@@ -292,15 +292,21 @@
         </div>
         <div class="doc-meta">
           <div class="doc-title">Devis — Facture</div>
-          Référence <strong>{{number}}</strong><br />
-          Le {{date}}
+          Référence
+          <strong>{{number}}</strong><br />
+          Le
+          {{date}}
         </div>
       </div>
 
       <div class="quote-title">
         Devis, facture :
         <strong>{{eventTypeLabel}}</strong>
-        / {{eventPeriod}} / {{attendees}} personnes
+        /
+        {{eventPeriod}}
+        /
+        {{attendees}}
+        personnes
       </div>
 
       <table class="parties">
@@ -353,9 +359,10 @@
       </div>
       {{#if hasDiscount}}
         <div class="discount-note">
-          (*) Remise exceptionnelle de {{formatXOF discountAmount}}{{#if
-            discountReason
-          }} — {{discountReason}}{{/if}}.
+          (*) Remise exceptionnelle de
+          {{formatXOF discountAmount}}{{#if discountReason}}
+            —
+            {{discountReason}}{{/if}}.
         </div>
       {{/if}}
 
@@ -384,13 +391,14 @@
           supplémentaires.</li>
         <li>Ne pas agrafer des éléments sur la toile.</li>
         <li>Ne pas déposer des robots sur les armoires de climatisation.</li>
-        <li>Verser une caution remboursable de {{formatXOF cautionAmount}} pour
-          couvrir tout dommage sur le matériel ou les installations. Ce montant
-          sera payé 72 heures avant le début de l'événement. Après vérification
-          par notre équipe, la caution sera intégralement remboursée si aucun
-          dommage n'est constaté. En cas de casse ou de perte, le montant
-          correspondant à la valeur des articles endommagés sera déduit de la
-          caution.</li>
+        <li>Verser une caution remboursable de
+          {{formatXOF cautionAmount}}
+          pour couvrir tout dommage sur le matériel ou les installations. Ce
+          montant sera payé 72 heures avant le début de l'événement. Après
+          vérification par notre équipe, la caution sera intégralement
+          remboursée si aucun dommage n'est constaté. En cas de casse ou de
+          perte, le montant correspondant à la valeur des articles endommagés
+          sera déduit de la caution.</li>
         <li>La location est d'une durée de 12 heures (6 heures pour la mise en
           place et 6 heures pour l'événement).</li>
         <li>La date du début de l'événement devra être précisée par écrit sur le
@@ -400,8 +408,8 @@
           climatiseurs ne seront pas en marche. Seule l'administration du
           Pavillon Les Lys est habilitée à mettre en marche les climatiseurs
           pour rafraîchir la salle avant le début de l'événement (1h avant).</li>
-        <li>En cas de dépassement de la durée de location, une pénalité de
-          100 000 FCFA par heure sera appliquée.</li>
+        <li>En cas de dépassement de la durée de location, une pénalité de 100
+          000 FCFA par heure sera appliquée.</li>
       </ul>
 
       <div class="legal-footer">
@@ -455,7 +463,8 @@
             <div class="line">Signature</div>
           </div>
         </div>
-        <div class="ceremony-date">Date de début de la cérémonie : _______________________</div>
+        <div class="ceremony-date">Date de début de la cérémonie :
+          _______________________</div>
       {{/if}}
 
       <div class="legal-footer">
