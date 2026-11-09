@@ -119,8 +119,9 @@ jobs:
           DEPLOY_DIR: ${{ secrets.VPS_API_DEPLOY_DIR }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.sha_tag }}
         run: |
+          set -o pipefail
           ssh -p ${{ secrets.VPS_SSH_PORT }} ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-            "DEPLOY_DIR='${DEPLOY_DIR}' IMAGE_TAG='${IMAGE_TAG}' bash -s" << 'ENDSSH'
+            "DEPLOY_DIR='${DEPLOY_DIR}' IMAGE_TAG='${IMAGE_TAG}' bash -s" << 'ENDSSH' | tee deploy.log
             set -euo pipefail
             cd "${DEPLOY_DIR}"
 
@@ -141,7 +142,10 @@ jobs:
             echo "💾 Sauvegarde de la base avant déploiement…"
             mkdir -p backups
             BACKUP="backups/pre-deploy-${IMAGE_TAG}-$(date +%Y%m%d-%H%M%S).sql.gz"
-            docker compose exec -T postgres pg_dump -U "${DB_USER}" -d "${DB_NAME}" | gzip > "${BACKUP}"
+            # < /dev/null : le script arrive par stdin (bash -s). Sans ça, `exec`
+            # consomme la suite du script et le déploiement s'arrête en « succès ».
+            docker compose exec -T postgres pg_dump -U "${DB_USER}" -d "${DB_NAME}" < /dev/null | gzip > "${BACKUP}"
+            [ "$(gzip -dc "${BACKUP}" | head -c 1 | wc -c)" -eq 1 ] || { echo "❌ Sauvegarde vide"; exit 1; }
             chmod 600 "${BACKUP}"
             # On garde les 15 sauvegardes de déploiement les plus récentes.
             ls -1t backups/pre-deploy-*.sql.gz 2>/dev/null | tail -n +16 | xargs -r rm -f
@@ -174,11 +178,22 @@ jobs:
               exit 1
             fi
 
+            RUNNING_IMAGE="$(docker inspect -f '{{.Config.Image}}' "${CID}")"
+            if [[ "${RUNNING_IMAGE}" != *":${IMAGE_TAG}" ]]; then
+              echo "❌ Image en service inattendue : ${RUNNING_IMAGE} (attendu : *:${IMAGE_TAG})"
+              exit 1
+            fi
+            echo "✅ Image en service : ${RUNNING_IMAGE}"
+
             echo "🧹 Nettoyage des images obsolètes…"
             docker image prune -f
 
             echo "✅ API déployée (tag : ${IMAGE_TAG})."
+            echo "DEPLOY_COMPLETE"
           ENDSSH
+          # Garde-fou : si le script distant s'est interrompu en silence,
+          # le marqueur final est absent → le job échoue.
+          grep -q '^DEPLOY_COMPLETE$' deploy.log || { echo "❌ Script de déploiement interrompu"; exit 1; }
 
       - name: Smoke test public
         run: |
