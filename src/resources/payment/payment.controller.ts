@@ -113,14 +113,14 @@ export class PaymentController {
 
   @Patch(":id/mark-paid")
   @Roles(Role.ADMIN, Role.EVENT_MANAGER)
-  markAsPaid(@Param("id") id: string) {
-    return this.paymentService.markAsPaid(id);
+  markAsPaid(@Param("id") id: string, @CurrentUser() user: any) {
+    return this.paymentService.markAsPaid(id, user.id);
   }
 
   @Patch(":id/refund")
   @Roles(Role.ADMIN)
-  refund(@Param("id") id: string) {
-    return this.paymentService.refund(id);
+  refund(@Param("id") id: string, @CurrentUser() user: any) {
+    return this.paymentService.refund(id, user.id);
   }
 
   @Get(":id/invoice-pdf")

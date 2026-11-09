@@ -218,6 +218,19 @@ describe("PaymentService", () => {
     });
   });
 
+  describe("markAsPaid — règles métier", () => {
+    it("refuse de valider un paiement sur un dossier annulé", async () => {
+      prismaService.payment.findUnique.mockResolvedValue({
+        ...mockPayment,
+        eventFolder: { ...mockPayment.eventFolder, status: "CANCELLED" },
+      });
+      await expect(service.markAsPaid("payment-1", "admin-1")).rejects.toThrow(
+        "dossier annulé",
+      );
+      expect(prismaService.payment.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe("refund", () => {
     it("should refund a paid payment", async () => {
       const paidPayment = { ...mockPayment, status: PaymentStatus.PAID };

@@ -421,6 +421,7 @@ export class UserService {
       where: {
         eventFolder: { userId: id },
         status: "PAID",
+        type: { not: "CAUTION" }, // la caution est restituable
       },
       _sum: {
         amount: true,

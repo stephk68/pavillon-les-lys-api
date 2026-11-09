@@ -69,6 +69,32 @@ const VALID_TRANSITIONS: Record<EventStatus, EventStatus[]> = {
   CANCELLED: [],
 };
 
+/**
+ * Caution exigée pour un dossier : le montant saisi sur le dossier fait foi
+ * (c'est celui imprimé sur le devis) ; à défaut, la valeur globale.
+ */
+export function getCautionAmount(folder: {
+  cautionAmount?: Prisma.Decimal | number | null;
+}): number {
+  const own = Number(folder.cautionAmount ?? 0);
+  return own > 0 ? own : Number(process.env.CAUTION_AMOUNT || 200000);
+}
+
+/**
+ * Acompte exigé : le montant saisi sur le dossier s'il existe, sinon 50 %
+ * du total TTC.
+ */
+export function getDepositRequired(folder: {
+  depositAmount?: Prisma.Decimal | number | null;
+  totalTTC: Prisma.Decimal | number;
+}): number {
+  const own = Number(folder.depositAmount ?? 0);
+  return own > 0 ? own : Number(folder.totalTTC) * 0.5;
+}
+
+/** Tolérance d'arrondi sur les comparaisons de montants (XOF). */
+const AMOUNT_EPSILON = 0.5;
+
 @Injectable()
 export class EventFolderService {
   private readonly logger = new Logger(EventFolderService.name);
@@ -456,6 +482,90 @@ export class EventFolderService {
   // ==================== UPDATE ====================
 
   async update(id: string, dto: UpdateEventFolderDto, updatedBy?: string) {
+    const updated = await this.applyUpdate(id, dto, updatedBy);
+
+    const pricingTouched =
+      dto.items !== undefined ||
+      dto.totalAmount !== undefined ||
+      dto.discountAmount !== undefined ||
+      dto.depositAmount !== undefined ||
+      dto.cautionAmount !== undefined;
+
+    if (pricingTouched && (await this.resyncPendingPayments(id))) {
+      return this.findOne(id);
+    }
+    return updated;
+  }
+
+  /**
+   * Réaligne les paiements EN ATTENTE sur les montants actuels du dossier
+   * (après un changement de prix, de remise, d'acompte ou de caution).
+   * Les paiements déjà validés ne sont jamais modifiés : le solde en attente
+   * absorbe la différence. Renvoie true si au moins un montant a changé.
+   */
+  private async resyncPendingPayments(id: string): Promise<boolean> {
+    const folder = await this.prisma.eventFolder.findUnique({
+      where: { id },
+      include: { payments: true },
+    });
+    if (!folder || folder.payments.length === 0) return false;
+
+    const sum = (type: PaymentType, status: PaymentStatus) =>
+      folder.payments
+        .filter((p) => p.type === type && p.status === status)
+        .reduce((acc, p) => acc + Number(p.amount), 0);
+    const pendingOf = (type: PaymentType) =>
+      folder.payments.filter(
+        (p) => p.type === type && p.status === PaymentStatus.PENDING,
+      );
+
+    const totalTTC = Number(folder.totalTTC);
+    const acomptePaid = sum(PaymentType.ACOMPTE, PaymentStatus.PAID);
+    const soldePaid = sum(PaymentType.SOLDE, PaymentStatus.PAID);
+    const cautionPaid = sum(PaymentType.CAUTION, PaymentStatus.PAID);
+
+    // Montant restant à percevoir pour chaque type
+    const acompteTarget = Math.max(
+      0,
+      Math.min(getDepositRequired(folder), totalTTC) - acomptePaid,
+    );
+    const pendingAcompte = pendingOf(PaymentType.ACOMPTE);
+    const acompteDue = pendingAcompte.length > 0 ? acompteTarget : 0;
+    const soldeTarget = Math.max(
+      0,
+      totalTTC - acomptePaid - soldePaid - acompteDue,
+    );
+    const cautionTarget = Math.max(0, getCautionAmount(folder) - cautionPaid);
+
+    const updates: Prisma.PrismaPromise<unknown>[] = [];
+    const align = (type: PaymentType, target: number) => {
+      const pending = pendingOf(type);
+      if (pending.length !== 1) return; // échéancier personnalisé : on n'y touche pas
+      if (Math.abs(Number(pending[0].amount) - target) < AMOUNT_EPSILON) return;
+      updates.push(
+        this.prisma.payment.update({
+          where: { id: pending[0].id },
+          data: { amount: new Prisma.Decimal(target) },
+        }),
+      );
+    };
+    align(PaymentType.ACOMPTE, acompteTarget);
+    align(PaymentType.SOLDE, soldeTarget);
+    align(PaymentType.CAUTION, cautionTarget);
+
+    if (updates.length === 0) return false;
+    await this.prisma.$transaction(updates);
+    this.logger.log(
+      `Dossier ${folder.folderNumber} : ${updates.length} paiement(s) en attente recalculé(s)`,
+    );
+    return true;
+  }
+
+  private async applyUpdate(
+    id: string,
+    dto: UpdateEventFolderDto,
+    updatedBy?: string,
+  ) {
     const folder = await this.findOne(id);
 
     // If dates changed, re-check availability
@@ -676,9 +786,7 @@ export class EventFolderService {
       .toLocaleDateString("fr-FR", { month: "long", year: "numeric" })
       .toUpperCase();
 
-    const cautionAmount = Number(
-      folder.cautionAmount || process.env.CAUTION_AMOUNT || 200000,
-    );
+    const cautionAmount = getCautionAmount(folder);
 
     return this.pdfService.generateQuotePdf({
       number: folder.folderNumber,
@@ -785,11 +893,11 @@ export class EventFolderService {
           _sum: { amount: true },
         });
         const acompteAmount = Number(acomptePaid._sum.amount || 0);
-        const requiredAcompte = Number(folder.totalTTC) * 0.5;
+        const requiredAcompte = getDepositRequired(folder);
 
-        if (acompteAmount < requiredAcompte) {
+        if (acompteAmount + AMOUNT_EPSILON < requiredAcompte) {
           throw new BadRequestException(
-            `Acompte insuffisant. Requis : ${requiredAcompte.toFixed(0)} XOF (50%), ` +
+            `Acompte insuffisant. Requis : ${requiredAcompte.toFixed(0)} XOF, ` +
               `Payé : ${acompteAmount.toFixed(0)} XOF`,
           );
         }
@@ -809,22 +917,30 @@ export class EventFolderService {
           .filter((p) => p.type === PaymentType.CAUTION)
           .reduce((sum, p) => sum + Number(p.amount), 0);
 
-        if (soldePaid <= 0) {
+        const acomptePaid = payments
+          .filter((p) => p.type === PaymentType.ACOMPTE)
+          .reduce((sum, p) => sum + Number(p.amount), 0);
+
+        // Le total du dossier doit être intégralement réglé (acompte + solde).
+        // Avant, n'importe quel solde > 0 suffisait.
+        const totalTTC = Number(folder.totalTTC);
+        const totalPaid = acomptePaid + soldePaid;
+        if (totalPaid + AMOUNT_EPSILON < totalTTC) {
           throw new BadRequestException(
-            "Le solde doit être payé pour passer en READY",
-          );
-        }
-        if (cautionPaid <= 0) {
-          throw new BadRequestException(
-            "La caution doit être payée pour passer en READY",
+            `Le dossier n'est pas soldé. Total : ${totalTTC.toFixed(0)} XOF, ` +
+              `payé : ${totalPaid.toFixed(0)} XOF, reste : ${(totalTTC - totalPaid).toFixed(0)} XOF`,
           );
         }
 
-        // Auto-complete any remaining checklist items
-        await this.prisma.checklistItem.updateMany({
-          where: { eventFolderId: id, completed: false },
-          data: { completed: true, completedAt: new Date() },
-        });
+        const cautionRequired = getCautionAmount(folder);
+        if (cautionPaid + AMOUNT_EPSILON < cautionRequired) {
+          throw new BadRequestException(
+            `Caution incomplète. Requise : ${cautionRequired.toFixed(0)} XOF, ` +
+              `payée : ${cautionPaid.toFixed(0)} XOF`,
+          );
+        }
+        // La checklist n'est plus cochée automatiquement : ce sont les tâches
+        // de préparation de la salle, vérifiées au passage en COMPLETED.
         break;
       }
 
@@ -970,7 +1086,8 @@ export class EventFolderService {
     });
 
     const totalTTC = Number(folder.totalTTC);
-    const acompteRequired = totalTTC * 0.5;
+    const acompteRequired = getDepositRequired(folder);
+    const cautionRequired = getCautionAmount(folder);
 
     const acomptePaid = payments
       .filter(
@@ -1003,6 +1120,7 @@ export class EventFolderService {
       soldePaid,
       soldeRemaining: Math.max(0, soldeRemaining),
       cautionPaid,
+      cautionRequired,
       totalPaid,
       isFullyPaid: soldeRemaining <= 0,
       payments: payments.map((p) => ({
@@ -1036,9 +1154,9 @@ export class EventFolderService {
       );
     }
 
-    const acompte = totalTTC * 0.5;
+    const acompte = Math.min(getDepositRequired(folder), totalTTC);
     const solde = totalTTC - acompte;
-    const caution = Number(process.env.CAUTION_AMOUNT || 200000); // Défaut 200 000 XOF (cf. devis/contrat)
+    const caution = getCautionAmount(folder);
 
     if (!folder.schedules || folder.schedules.length === 0) {
       throw new BadRequestException("Le dossier n'a pas d'horaires définis.");
