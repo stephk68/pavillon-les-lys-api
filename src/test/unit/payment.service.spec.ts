@@ -5,6 +5,10 @@ import { Decimal } from "@prisma/client/runtime/library";
 import { PdfService } from "../../common/services/pdf.service";
 import { PrismaService } from "../../common/services/prisma.service";
 import { PaymentService } from "../../resources/payment/payment.service";
+import { MailService } from "../../mail/mail.service";
+import { AuditLogService } from "../../resources/audit-log/audit-log.service";
+import { EventFolderService } from "../../resources/event-folder/event-folder.service";
+import { mockMailService, mockAuditLogService, mockEventFolderService } from "../mocks/services.mock";
 
 describe("PaymentService", () => {
   let service: PaymentService;
@@ -81,6 +85,9 @@ describe("PaymentService", () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: MailService, useValue: mockMailService },
+        { provide: AuditLogService, useValue: mockAuditLogService },
+        { provide: EventFolderService, useValue: mockEventFolderService },
         PaymentService,
         {
           provide: PrismaService,

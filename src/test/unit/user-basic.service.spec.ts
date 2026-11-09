@@ -4,6 +4,8 @@ import { Role } from "@prisma/client";
 import { PrismaService } from "../../common/services/prisma.service";
 import { UserService } from "../../resources/user/user.service";
 import { clearAllMocks, mockPrismaService } from "../mocks/prisma.mock";
+import { MailService } from "../../mail/mail.service";
+import { mockMailService } from "../mocks/services.mock";
 
 describe("UserService - Basic Tests", () => {
   let service: UserService;
@@ -14,6 +16,7 @@ describe("UserService - Basic Tests", () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: MailService, useValue: mockMailService },
         UserService,
         {
           provide: PrismaService,

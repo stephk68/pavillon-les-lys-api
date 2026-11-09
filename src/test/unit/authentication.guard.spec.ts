@@ -87,7 +87,7 @@ describe('AuthenticationGuard', () => {
     it('should allow access with valid token', async () => {
       // Arrange
       mockReflector.getAllAndOverride.mockReturnValue(false); // isPublic = false
-      const mockUser = { id: 'user-1', email: 'test@example.com' };
+      const mockUser = { id: 'user-1', email: 'test@example.com', isActive: true };
       const mockPayload = { sub: 'user-1', email: 'test@example.com' };
 
       mockJwtService.verify.mockReturnValue(mockPayload);
@@ -131,6 +131,32 @@ describe('AuthenticationGuard', () => {
         UnauthorizedException,
       );
       expect(mockJwtService.verify).toHaveBeenCalledWith('invalid-token');
+    });
+
+    it('should reject a password-reset token used as access token', async () => {
+      mockReflector.getAllAndOverride.mockReturnValue(false);
+      mockJwtService.verify.mockReturnValue({ sub: 'user-1', type: 'password-reset' });
+      const context = createMockExecutionContext('Bearer reset-token');
+
+      await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
+      expect(mockUserService.findOne).not.toHaveBeenCalled();
+    });
+
+    it('should reject an otp-verified temp token used as access token', async () => {
+      mockReflector.getAllAndOverride.mockReturnValue(false);
+      mockJwtService.verify.mockReturnValue({ sub: 'user-1', type: 'otp-verified' });
+      const context = createMockExecutionContext('Bearer temp-token');
+
+      await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should reject a deactivated user even with a valid token', async () => {
+      mockReflector.getAllAndOverride.mockReturnValue(false);
+      mockJwtService.verify.mockReturnValue({ sub: 'user-1', email: 'test@example.com' });
+      mockUserService.findOne.mockResolvedValue({ id: 'user-1', email: 'test@example.com', isActive: false });
+      const context = createMockExecutionContext('Bearer valid-token');
+
+      await expect(guard.canActivate(context)).rejects.toThrow('Ce compte a été désactivé');
     });
 
     it('should throw UnauthorizedException when user is not found', async () => {

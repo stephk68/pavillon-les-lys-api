@@ -51,3 +51,24 @@ export const mockPaymentService = {
   getUserPayments: jest.fn(),
   generateInvoicePdf: jest.fn(),
 };
+
+/** MailService : toutes les méthodes résolvent sans envoyer d'email. */
+export const mockMailService = {
+  sendBookingConfirmation: jest.fn().mockResolvedValue(undefined),
+  sendContactMessage: jest.fn().mockResolvedValue(undefined),
+  sendContract: jest.fn().mockResolvedValue(undefined),
+  sendEventReminder: jest.fn().mockResolvedValue(undefined),
+  sendFeedbackRequest: jest.fn().mockResolvedValue(undefined),
+  sendOtpCode: jest.fn().mockResolvedValue(undefined),
+  sendPasswordChangedConfirmation: jest.fn().mockResolvedValue(undefined),
+  sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined),
+  sendPaymentConfirmation: jest.fn().mockResolvedValue(undefined),
+  sendQuoteDocument: jest.fn().mockResolvedValue(undefined),
+  sendStaffWelcomeEmail: jest.fn().mockResolvedValue(undefined),
+  sendWelcomeEmail: jest.fn().mockResolvedValue(undefined),
+};
+
+export const mockAuditLogService = {
+  create: jest.fn().mockResolvedValue({}),
+  findAll: jest.fn().mockResolvedValue({ data: [], total: 0 }),
+};
