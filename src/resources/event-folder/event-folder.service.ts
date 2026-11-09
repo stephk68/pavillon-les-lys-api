@@ -92,6 +92,14 @@ export function getDepositRequired(folder: {
   return own > 0 ? own : Number(folder.totalTTC) * 0.5;
 }
 
+/**
+ * Clé du verrou PostgreSQL qui sérialise les opérations réservant la salle
+ * (création, changement de dates, passage en QUOTED). Sans lui, deux
+ * réservations simultanées passaient toutes deux la vérification de
+ * disponibilité, et deux créations pouvaient obtenir le même numéro.
+ */
+const BOOKING_LOCK_KEY = 42071301;
+
 /** Tolérance d'arrondi sur les comparaisons de montants (XOF). */
 const AMOUNT_EPSILON = 0.5;
 
@@ -107,6 +115,23 @@ export class EventFolderService {
   ) {}
 
   // ==================== HELPERS ====================
+
+  /** Verrou transactionnel : libéré automatiquement en fin de transaction. */
+  private async lockBooking(tx: Prisma.TransactionClient) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${BOOKING_LOCK_KEY})`;
+  }
+
+  private async assertAvailable(
+    schedules: { date: string | Date; startTime: string; endTime: string }[],
+    excludeId: string | undefined,
+    tx: Prisma.TransactionClient,
+  ) {
+    if (!(await this.checkAvailability(schedules, excludeId, tx))) {
+      throw new ConflictException(
+        "La salle n'est pas disponible pour les dates sélectionnées",
+      );
+    }
+  }
 
   private async generateNumber(
     tx?: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
@@ -206,15 +231,12 @@ export class EventFolderService {
       }
     }
 
-    // Check availability
-    const isAvailable = await this.checkAvailability(dto.schedules);
-    if (!isAvailable) {
-      throw new ConflictException(
-        "La salle n'est pas disponible pour les dates sélectionnées",
-      );
-    }
-
     const result = await this.prisma.$transaction(async (tx) => {
+      // 0) Disponibilité vérifiée sous verrou, dans la même transaction que
+      //    la création (et que la génération du numéro de dossier).
+      await this.lockBooking(tx);
+      await this.assertAvailable(dto.schedules, undefined, tx);
+
       // 1) Resolve or create user
       let userId = dto.userId;
       let isNewClient = false;
@@ -582,13 +604,6 @@ export class EventFolderService {
           );
         }
       }
-
-      const isAvailable = await this.checkAvailability(dto.schedules, id);
-      if (!isAvailable) {
-        throw new ConflictException(
-          "La salle n'est pas disponible pour les dates sélectionnées",
-        );
-      }
     }
 
     // Build update data
@@ -649,6 +664,12 @@ export class EventFolderService {
     // If items or schedules provided, handle in transaction
     if (dto.items || dto.schedules) {
       return this.prisma.$transaction(async (tx) => {
+        // Nouvelles dates : disponibilité vérifiée sous verrou
+        if (dto.schedules) {
+          await this.lockBooking(tx);
+          await this.assertAvailable(dto.schedules, id, tx);
+        }
+
         // Recreate items if provided
         if (dto.items) {
           await tx.eventFolderItem.deleteMany({
@@ -978,17 +999,30 @@ export class EventFolderService {
       }
     }
 
-    // Perform the transition
-    const updated = await this.prisma.eventFolder.update({
-      where: { id },
-      data: {
-        status: targetStatus,
-        ...(targetStatus === EventStatus.QUOTED && !folder.contractSentAt
-          ? { contractSentAt: new Date() }
-          : {}),
-        updatedBy,
-      },
-      include: this.fullInclude(),
+    // Perform the transition. Un dossier PROSPECT ne bloque pas la salle ;
+    // en passant QUOTED il commence à la bloquer : on revérifie donc la
+    // disponibilité (avant, un PROSPECT pouvait passer QUOTED sur une date
+    // déjà réservée par un autre dossier).
+    const startsBlockingRoom =
+      currentStatus === EventStatus.PROSPECT &&
+      targetStatus === EventStatus.QUOTED;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (startsBlockingRoom) {
+        await this.lockBooking(tx);
+        await this.assertAvailable(folder.schedules, id, tx);
+      }
+      return tx.eventFolder.update({
+        where: { id },
+        data: {
+          status: targetStatus,
+          ...(targetStatus === EventStatus.QUOTED && !folder.contractSentAt
+            ? { contractSentAt: new Date() }
+            : {}),
+          updatedBy,
+        },
+        include: this.fullInclude(),
+      });
     });
 
     this.logger.log(
@@ -1235,6 +1269,7 @@ export class EventFolderService {
   async checkAvailability(
     schedules: { date: string | Date; startTime: string; endTime: string }[],
     excludeId?: string,
+    db: Prisma.TransactionClient = this.prisma,
   ): Promise<boolean> {
     if (!schedules.length) return true;
 
@@ -1264,7 +1299,7 @@ export class EventFolderService {
     maxDate.setDate(maxDate.getDate() + 1);
     maxDate.setHours(23, 59, 59, 999);
 
-    const existing = await this.prisma.eventSchedule.findMany({
+    const existing = await db.eventSchedule.findMany({
       where: {
         date: { gte: minDate, lte: maxDate },
         eventFolder: {
@@ -1342,9 +1377,11 @@ export class EventFolderService {
     const schedules = await this.prisma.eventSchedule.findMany({
       where: {
         date: { gte: startOfMonth, lte: endOfMonth },
+        // Mêmes statuts que checkAvailability : un dossier QUOTED bloque la
+        // salle, il doit donc apparaître comme pris dans le calendrier public.
         eventFolder: {
           status: {
-            in: [EventStatus.BOOKED, EventStatus.READY],
+            in: [EventStatus.QUOTED, EventStatus.BOOKED, EventStatus.READY],
           },
         },
       },

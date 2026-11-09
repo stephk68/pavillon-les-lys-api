@@ -50,8 +50,12 @@ function makeService(folder: any, payments: any[]) {
       update: jest.fn().mockResolvedValue({}),
     },
     checklistItem: { updateMany: jest.fn(), count: jest.fn().mockResolvedValue(0) },
-    $transaction: jest.fn().mockResolvedValue([]),
+    $executeRaw: jest.fn().mockResolvedValue(1),
   };
+  // Transaction interactive (callback) ou tableau de requêtes
+  prisma.$transaction = jest.fn((arg: any) =>
+    typeof arg === "function" ? arg(prisma) : Promise.all(arg),
+  );
   const audit = { create: jest.fn().mockResolvedValue({}) };
   const mail = { sendFeedbackRequest: jest.fn().mockResolvedValue(undefined) };
   const service = new EventFolderService(prisma, audit as any, mail as any, {} as any);
@@ -144,5 +148,39 @@ describe("Recalcul des paiements en attente après un changement de prix", () =>
 
     const calls = prisma.payment.update.mock.calls.map((c: any) => [c[0].where.id, Number(c[0].data.amount)]);
     expect(calls).toEqual([["SOLDE-500000-PENDING", 700000]]);
+  });
+});
+
+describe("Passage PROSPECT → QUOTED (la salle commence à être bloquée)", () => {
+  const prospect = () =>
+    baseFolder({
+      status: EventStatus.PROSPECT,
+      schedules: [{ date: new Date("2027-06-12"), startTime: "14:00", endTime: "23:00" }],
+    });
+
+  it("refuse si un autre dossier bloque déjà ce créneau, sous verrou", async () => {
+    const { service, prisma } = makeService(prospect(), []);
+    prisma.eventSchedule = {
+      findMany: jest.fn().mockResolvedValue([
+        { date: new Date("2027-06-12"), startTime: "18:00", endTime: "02:00" },
+      ]),
+    };
+
+    await expect(service.transitionStatus("f1", EventStatus.QUOTED, "admin")).rejects.toThrow(
+      "pas disponible",
+    );
+    expect(prisma.$executeRaw).toHaveBeenCalled(); // verrou pris
+    expect(prisma.eventFolder.update).not.toHaveBeenCalled();
+  });
+
+  it("accepte si le créneau est libre", async () => {
+    const { service, prisma } = makeService(prospect(), []);
+    prisma.eventSchedule = { findMany: jest.fn().mockResolvedValue([]) };
+    // Pas de PDF/mail dans ce test : on neutralise l'envoi du contrat.
+    jest.spyOn(service, "buildQuotePdfBuffer").mockResolvedValue(Buffer.from(""));
+    (service as any).mailService.sendContract = jest.fn().mockResolvedValue(undefined);
+
+    await service.transitionStatus("f1", EventStatus.QUOTED, "admin");
+    expect(prisma.eventFolder.update).toHaveBeenCalled();
   });
 });
