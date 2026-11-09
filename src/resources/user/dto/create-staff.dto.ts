@@ -1,5 +1,11 @@
 import { Role } from "@prisma/client";
-import { IsEmail, IsEnum, IsOptional, IsString } from "class-validator";
+import {
+  IsBoolean,
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsString,
+} from "class-validator";
 
 export class CreateStaffDto {
   @IsEmail()
@@ -18,4 +24,12 @@ export class CreateStaffDto {
   @IsOptional()
   @IsEnum(Role)
   role?: Role;
+
+  /**
+   * Confirmation explicite de l'admin : l'email appartient déjà à un CLIENT,
+   * qui sera promu au rôle demandé (son compte et ses dossiers sont conservés).
+   */
+  @IsOptional()
+  @IsBoolean()
+  confirmPromotion?: boolean;
 }

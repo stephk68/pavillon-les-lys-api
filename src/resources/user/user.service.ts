@@ -24,6 +24,23 @@ export type SafeUser = Omit<
   | "resetTokenExpiry"
 >;
 
+/** Champs renvoyés pour un utilisateur (aucun champ sensible). */
+const SAFE_USER_SELECT = {
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  phone: true,
+  role: true,
+  isActive: true,
+  isFirstLogin: true,
+  lastLoginAt: true,
+  createdAt: true,
+  updatedAt: true,
+  createdBy: true,
+  updatedBy: true,
+} as const;
+
 @Injectable()
 export class UserService {
   constructor(
@@ -79,16 +96,8 @@ export class UserService {
 
   async createStaff(
     createStaffDto: CreateStaffDto,
+    actorId?: string,
   ): Promise<SafeUser> {
-    // Vérifier si l'utilisateur existe déjà
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email: createStaffDto.email },
-    });
-
-    if (existingUser) {
-      throw new ConflictException("Un utilisateur avec cet email existe déjà");
-    }
-
     // Valider que le rôle est ADMIN ou EVENT_MANAGER
     if (
       !createStaffDto.role ||
@@ -96,6 +105,36 @@ export class UserService {
         createStaffDto.role !== Role.EVENT_MANAGER)
     ) {
       throw new BadRequestException("Le rôle doit être ADMIN ou EVENT_MANAGER");
+    }
+
+    // Vérifier si l'utilisateur existe déjà
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: createStaffDto.email },
+    });
+
+    if (existingUser) {
+      if (existingUser.role !== Role.CLIENT) {
+        throw new ConflictException(
+          "Cette personne fait déjà partie de l'équipe",
+        );
+      }
+      // L'email appartient à un client : on demande d'abord confirmation au
+      // créateur (code EXISTING_CLIENT, géré par le backoffice), puis on
+      // promeut le compte existant au lieu de refuser.
+      if (!createStaffDto.confirmPromotion) {
+        throw new ConflictException({
+          statusCode: 409,
+          code: "EXISTING_CLIENT",
+          message:
+            "Cet email appartient déjà à un client. Confirmez pour lui attribuer ce rôle.",
+          existingUser: {
+            firstName: existingUser.firstName,
+            lastName: existingUser.lastName,
+            email: existingUser.email,
+          },
+        });
+      }
+      return this.promoteClientToStaff(existingUser, createStaffDto.role, actorId);
     }
 
     // Générer un mot de passe temporaire aléatoire sécurisé (jamais divulgué)
@@ -134,6 +173,41 @@ export class UserService {
     // Envoyer l'email de bienvenue (fire-and-forget)
     this.mailService.sendStaffWelcomeEmail(user).catch(() => {});
 
+    return user;
+  }
+
+  /**
+   * Promeut un client existant en membre du staff. Le compte (mot de passe,
+   * dossiers, paiements) est conservé ; seul le rôle change, avec effet
+   * immédiat puisque le guard relit le rôle en base à chaque requête.
+   */
+  private async promoteClientToStaff(
+    client: User,
+    role: Role,
+    actorId?: string,
+  ): Promise<SafeUser> {
+    const user = await this.prisma.user.update({
+      where: { id: client.id },
+      data: { role, isActive: true, updatedBy: actorId },
+      select: SAFE_USER_SELECT,
+    });
+
+    if (actorId) {
+      await this.prisma.auditLog
+        .create({
+          data: {
+            action: "USER_PROMOTED",
+            description: `${client.firstName} ${client.lastName} (client) promu ${role === Role.ADMIN ? "administrateur" : "gestionnaire"}`,
+            entityType: "User",
+            entityId: client.id,
+            userId: actorId,
+            metadata: { previousRole: client.role, newRole: role },
+          },
+        })
+        .catch(() => {});
+    }
+
+    this.mailService.sendStaffWelcomeEmail(user).catch(() => {});
     return user;
   }
 

@@ -53,11 +53,17 @@ export class UserController {
   // Seuls les admins peuvent créer du staff
   @Roles(Role.ADMIN)
   @Post("staff")
-  async createStaff(@Body() createStaffDto: CreateStaffDto) {
-    return this.userService.createStaff({
-      ...createStaffDto,
-      role: createStaffDto.role || Role.EVENT_MANAGER,
-    });
+  async createStaff(
+    @Body() createStaffDto: CreateStaffDto,
+    @CurrentUser() currentUser: any,
+  ) {
+    return this.userService.createStaff(
+      {
+        ...createStaffDto,
+        role: createStaffDto.role || Role.EVENT_MANAGER,
+      },
+      currentUser.id,
+    );
   }
 
   // Admins et staff peuvent récupérer la liste des clients
