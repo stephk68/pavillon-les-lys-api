@@ -14,6 +14,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { Role } from "@prisma/client";
+import { IsString, MinLength } from "class-validator";
 import { Roles } from "src/common/decorators/permission.decorator";
 import { Public } from "src/common/decorators/public.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
@@ -24,9 +25,16 @@ import { CreateUserDto } from "./dto/create-user.dto";
 import { UpdateUserDto } from "./dto/update-user.dto";
 import { UserService } from "./user.service";
 
-// DTO pour la mise à jour du mot de passe
+// DTO pour la mise à jour du mot de passe. Sans décorateurs class-validator,
+// le ValidationPipe (forbidNonWhitelisted) rejetait systématiquement la requête.
 export class UpdatePasswordDto {
+  @IsString()
   currentPassword: string;
+
+  @IsString()
+  @MinLength(8, {
+    message: "Le mot de passe doit contenir au moins 8 caractères",
+  })
   newPassword: string;
 }
 
@@ -149,8 +157,10 @@ export class UserController {
     // Vérifier les permissions
     if (currentUser.id === id || currentUser.role === Role.ADMIN) {
       // Si ce n'est pas un admin qui modifie, empêcher la modification du rôle
+      // Un non-admin ne peut modifier ni son rôle ni son statut actif
+      // (sinon un compte désactivé pourrait se réactiver lui-même).
       if (currentUser.id === id && currentUser.role !== Role.ADMIN) {
-        const { role, ...updateData } = updateUserDto;
+        const { role, isActive, ...updateData } = updateUserDto;
         return this.userService.update(id, updateData);
       }
       return this.userService.update(id, updateUserDto);

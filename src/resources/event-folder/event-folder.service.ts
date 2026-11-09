@@ -331,6 +331,25 @@ export class EventFolderService {
   // ==================== PUBLIC RESERVATION REQUEST ====================
 
   async createPublicRequest(dto: CreateReservationRequestDto) {
+    // Pas de demande pour une date passée.
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (new Date(dto.date) < today) {
+      throw new BadRequestException("La date souhaitée est déjà passée");
+    }
+
+    // Un formulaire public ne doit jamais rattacher un dossier à un compte du
+    // staff (ADMIN / EVENT_MANAGER) : seul un compte CLIENT peut être réutilisé.
+    const existing = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+      select: { role: true },
+    });
+    if (existing && existing.role !== "CLIENT") {
+      throw new BadRequestException(
+        "Impossible d'enregistrer la demande avec cette adresse email",
+      );
+    }
+
     // Map to existing create flow
     const createDto: CreateEventFolderDto = {
       clientEmail: dto.email,

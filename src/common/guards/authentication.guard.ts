@@ -41,12 +41,18 @@ export class AuthenticationGuard implements CanActivate {
 
     if (!token) {
       this.logger.warn(`❌ Token manquant pour: ${route}`);
-      this.logger.debug(`Headers reçus: ${JSON.stringify(request.headers)}`);
       throw new UnauthorizedException("Token d'accès requis");
     }
 
     try {
       const payload = this.jwtService.verify(token);
+
+      // Les tokens « password-reset » et « otp-verified » sont signés avec le
+      // même secret : ils ne doivent jamais servir de token d'accès.
+      if (payload.type) {
+        this.logger.warn(`🔐 Token de type "${payload.type}" refusé pour: ${route}`);
+        throw new UnauthorizedException("Token invalide");
+      }
       this.logger.debug(
         `✅ Token valide - User ID: ${payload.sub}, Email: ${payload.email}`
       );
@@ -58,6 +64,12 @@ export class AuthenticationGuard implements CanActivate {
         throw new UnauthorizedException("Utilisateur non trouvé");
       }
 
+      // Un compte désactivé perd immédiatement l'accès, même avec un token valide.
+      if (!user.isActive) {
+        this.logger.warn(`⛔ Compte désactivé: ${user.email}`);
+        throw new UnauthorizedException("Ce compte a été désactivé");
+      }
+
       this.logger.debug(
         `✅ Utilisateur trouvé: ${user.email} (Role: ${user.role})`
       );
@@ -65,6 +77,9 @@ export class AuthenticationGuard implements CanActivate {
       // Ajouter les informations de l'utilisateur à la requête
       request["user"] = user;
     } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
       if (error.name === "TokenExpiredError") {
         this.logger.warn(`⏰ Token expiré pour: ${route}`);
         throw new UnauthorizedException("Token expiré");

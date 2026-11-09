@@ -54,6 +54,7 @@ export class AuthController {
 
   // Route publique pour la réinitialisation de mot de passe
   @Public()
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   @Post("reset-password")
   @HttpCode(HttpStatus.OK)
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
@@ -146,6 +147,7 @@ export class AuthController {
 
   // Définit le mot de passe lors de la première connexion (après OTP)
   @Public()
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   @Post("set-first-password")
   @HttpCode(HttpStatus.OK)
   async setFirstPassword(@Body() setFirstPasswordDto: SetFirstPasswordDto) {

@@ -27,6 +27,7 @@ model User {
   resetTokenExpiry DateTime?
   otpCode          String?
   otpExpiry        DateTime?
+  otpAttempts      Int           @default(0)
   eventFolders     EventFolder[]
   payments         Payment[]
   feedbacks        Feedback[]

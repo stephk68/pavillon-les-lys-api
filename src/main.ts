@@ -1,26 +1,47 @@
 import { Logger, ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
+import { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module";
 
 async function bootstrap() {
   const logger = new Logger("Bootstrap");
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  // ============================================================================
-  // CORS CONFIGURATION - BLINDÉ POUR BACK OFFICE ET FRONT OFFICE
-  // ============================================================================
-  // const allowedOrigins = [
-  //   "http://localhost:3001", // Back Office (Dev)
-  //   "http://localhost:3002", // Front Office (Dev)
-  //   "http://localhost:3000", // API (Dev)
-  //   process.env.BACKOFFICE_URL, // Back Office (Prod)
-  //   process.env.FRONTOFFICE_URL, // Front Office (Prod)
-  // ].filter(Boolean);
+  // Derrière nginx, l'IP vue par l'API est celle du proxy : sans « trust proxy »,
+  // tous les visiteurs partageraient le même quota du rate limiting.
+  // TRUST_PROXY = nombre de proxys de confiance devant l'API (ex. 1).
+  if (process.env.TRUST_PROXY) {
+    app.set("trust proxy", Number(process.env.TRUST_PROXY) || 1);
+  }
 
-  logger.log("🔓 CORS: toutes les origines autorisées pour l'instant");
+  // CORS : liste blanche dès que les URL des fronts sont configurées.
+  const allowedOrigins = [
+    process.env.BACKOFFICE_URL,
+    process.env.FRONTOFFICE_URL,
+    ...(process.env.CORS_EXTRA_ORIGINS?.split(",") ?? []),
+    ...(process.env.NODE_ENV !== "production"
+      ? [
+          "http://localhost:3000",
+          "http://localhost:3001",
+          "http://localhost:3002",
+        ]
+      : []),
+  ]
+    .map((o) => o?.trim())
+    .filter((o): o is string => !!o);
+
+  const corsOrigin =
+    process.env.BACKOFFICE_URL || process.env.FRONTOFFICE_URL
+      ? allowedOrigins
+      : true;
+  logger.log(
+    corsOrigin === true
+      ? "⚠️ CORS: aucune URL de front configurée — toutes origines autorisées"
+      : `🔒 CORS: ${allowedOrigins.join(", ")}`,
+  );
 
   app.enableCors({
-    origin: true,
+    origin: corsOrigin,
     methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",
@@ -47,6 +68,5 @@ async function bootstrap() {
   const port = process.env.PORT ?? 4000;
   await app.listen(port);
   logger.log(`🚀 API démarrée sur le port ${port}`);
-  logger.log("📋 Origines autorisées: toutes");
 }
 bootstrap();
