@@ -602,18 +602,33 @@ export class EventFolderService {
       );
     }
 
-    // Check no PAID payments
-    const paidPayments = await this.prisma.payment.count({
-      where: { eventFolderId: id, status: PaymentStatus.PAID },
+    // Un paiement validé ou remboursé est une trace comptable : on la garde.
+    const settledPayments = await this.prisma.payment.count({
+      where: {
+        eventFolderId: id,
+        status: { in: [PaymentStatus.PAID, PaymentStatus.REFUNDED] },
+      },
     });
 
-    if (paidPayments > 0) {
+    if (settledPayments > 0) {
       throw new BadRequestException(
-        "Impossible de supprimer un dossier avec des paiements validés",
+        "Impossible de supprimer un dossier avec des paiements validés ou remboursés. Annulez-le plutôt.",
       );
     }
 
-    await this.prisma.eventFolder.delete({ where: { id } });
+    // Les paiements en attente et les avis ne sont pas supprimés en cascade
+    // par la base (FK sans onDelete) : sans ce nettoyage, la suppression
+    // échouait en erreur 500 dès qu'un échéancier avait été généré.
+    await this.prisma.$transaction([
+      this.prisma.payment.deleteMany({
+        where: { eventFolderId: id, status: PaymentStatus.PENDING },
+      }),
+      this.prisma.feedback.updateMany({
+        where: { eventFolderId: id },
+        data: { eventFolderId: null },
+      }),
+      this.prisma.eventFolder.delete({ where: { id } }),
+    ]);
   }
 
   // ==================== QUOTE / PDF / EMAIL ====================

@@ -378,17 +378,28 @@ export class UserService {
     // Vérifier si l'utilisateur existe
     await this.findOne(id);
 
-    // Vérifier s'il a des dossiers événement actifs
-    const activeFolders = await this.prisma.eventFolder.findMany({
-      where: {
-        userId: id,
-        status: { in: ["QUOTED", "BOOKED", "READY"] },
-      },
-    });
+    // Un compte qui a un historique (dossiers, paiements, avis, actions
+    // tracées) ne peut pas être supprimé : les clés étrangères l'interdisent
+    // et cet historique doit être conservé. Avant, la suppression échouait en
+    // erreur 500 ; on renvoie maintenant un message clair.
+    const [folders, payments, feedbacks, auditLogs] = await Promise.all([
+      this.prisma.eventFolder.count({ where: { userId: id } }),
+      this.prisma.payment.count({ where: { userId: id } }),
+      this.prisma.feedback.count({ where: { userId: id } }),
+      this.prisma.auditLog.count({ where: { userId: id } }),
+    ]);
 
-    if (activeFolders.length > 0) {
+    if (folders + payments + feedbacks + auditLogs > 0) {
+      const details = [
+        folders && `${folders} dossier(s)`,
+        payments && `${payments} paiement(s)`,
+        feedbacks && `${feedbacks} avis`,
+        auditLogs && `${auditLogs} action(s) tracée(s)`,
+      ]
+        .filter(Boolean)
+        .join(", ");
       throw new BadRequestException(
-        "Impossible de supprimer cet utilisateur car il a des dossiers événement actifs",
+        `Impossible de supprimer ce compte : il possède un historique (${details}). Désactivez-le plutôt.`,
       );
     }
 

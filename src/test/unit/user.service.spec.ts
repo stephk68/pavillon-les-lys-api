@@ -67,12 +67,18 @@ describe("UserService", () => {
       eventFolder: {
         findMany: jest.fn(),
         groupBy: jest.fn(),
+        count: jest.fn(),
       },
       payment: {
         aggregate: jest.fn(),
+        count: jest.fn(),
+      },
+      feedback: {
+        count: jest.fn(),
       },
       auditLog: {
         create: jest.fn().mockResolvedValue({}),
+        count: jest.fn(),
       },
     };
 
@@ -353,40 +359,39 @@ describe("UserService", () => {
   });
 
   describe("remove", () => {
-    it("should remove user successfully when no active folders", async () => {
-      const mockUserWithFolders = {
+    const withoutHistory = () => {
+      prismaService.eventFolder.count.mockResolvedValue(0);
+      prismaService.payment.count.mockResolvedValue(0);
+      prismaService.feedback.count.mockResolvedValue(0);
+      prismaService.auditLog.count.mockResolvedValue(0);
+    };
+
+    it("supprime un compte sans aucun historique", async () => {
+      prismaService.user.findUnique.mockResolvedValue({
         ...mockUserWithoutPassword,
         eventFolders: [],
-      };
-      prismaService.user.findUnique.mockResolvedValue(mockUserWithFolders);
-      prismaService.eventFolder.findMany.mockResolvedValue([]);
+      });
+      withoutHistory();
       prismaService.user.delete.mockResolvedValue(mockUser);
 
       await service.remove("user-1");
 
-      expect(prismaService.eventFolder.findMany).toHaveBeenCalledWith({
-        where: {
-          userId: "user-1",
-          status: { in: ["QUOTED", "BOOKED", "READY"] },
-        },
-      });
       expect(prismaService.user.delete).toHaveBeenCalledWith({
         where: { id: "user-1" },
       });
     });
 
-    it("should throw BadRequestException if user has active event folders", async () => {
-      const mockUserWithFolders = {
+    it("refuse avec un message clair si le compte a un historique (au lieu d'une erreur 500)", async () => {
+      prismaService.user.findUnique.mockResolvedValue({
         ...mockUserWithoutPassword,
         eventFolders: [],
-      };
-      prismaService.user.findUnique.mockResolvedValue(mockUserWithFolders);
-      prismaService.eventFolder.findMany.mockResolvedValue([
-        { id: "folder-1", status: "BOOKED" },
-      ]);
+      });
+      withoutHistory();
+      prismaService.eventFolder.count.mockResolvedValue(2);
+      prismaService.auditLog.count.mockResolvedValue(5);
 
       await expect(service.remove("user-1")).rejects.toThrow(
-        BadRequestException,
+        /historique \(2 dossier\(s\), 5 action\(s\) tracée\(s\)\).*Désactivez-le/,
       );
       expect(prismaService.user.delete).not.toHaveBeenCalled();
     });
