@@ -1,10 +1,13 @@
 import {
+    BadRequestException,
+    ConflictException,
     ForbiddenException,
     Injectable,
     NotFoundException,
 } from "@nestjs/common";
 import { Feedback } from "@prisma/client";
 import { PrismaService } from "../../common/services/prisma.service";
+import { pageParams } from "../../common/utils/pagination.util";
 import { CreateFeedbackDto } from "./dto/create-feedback.dto";
 import { UpdateFeedbackDto } from "./dto/update-feedback.dto";
 
@@ -38,6 +41,37 @@ export class FeedbackService {
     createFeedbackDto: CreateFeedbackDto,
     userId: string,
   ): Promise<Feedback> {
+    // Avis rattaché à un dossier : uniquement le sien, une fois l'événement
+    // terminé, et une seule fois. Avant, un client pouvait noter le dossier
+    // de quelqu'un d'autre, plusieurs fois, et avant l'événement.
+    if (createFeedbackDto.eventFolderId) {
+      const folder = await this.prisma.eventFolder.findUnique({
+        where: { id: createFeedbackDto.eventFolderId },
+        select: { userId: true, status: true },
+      });
+      if (!folder) {
+        throw new NotFoundException("Dossier introuvable");
+      }
+      if (folder.userId !== userId) {
+        throw new ForbiddenException(
+          "Vous ne pouvez donner votre avis que sur vos propres événements",
+        );
+      }
+      if (folder.status !== "COMPLETED") {
+        throw new BadRequestException(
+          "Vous pourrez donner votre avis une fois l'événement terminé",
+        );
+      }
+      const already = await this.prisma.feedback.count({
+        where: { userId, eventFolderId: createFeedbackDto.eventFolderId },
+      });
+      if (already > 0) {
+        throw new ConflictException(
+          "Vous avez déjà donné votre avis sur cet événement",
+        );
+      }
+    }
+
     return this.prisma.feedback.create({
       data: {
         userId,
@@ -74,12 +108,11 @@ export class FeedbackService {
       eventFolderId,
       rating,
       isRead,
-      skip = 0,
-      take = 50,
       startDate,
       endDate,
     } = options;
 
+    const { skip, take } = pageParams(options.skip, options.take);
     const where: any = {};
 
     if (userId) where.userId = userId;

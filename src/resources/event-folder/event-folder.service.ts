@@ -14,6 +14,12 @@ import {
 } from "@prisma/client";
 import * as bcrypt from "bcrypt";
 import { PdfService } from "../../common/services/pdf.service";
+import { pageParams } from "../../common/utils/pagination.util";
+import {
+  intervalsOf,
+  reservedOverlapping,
+  toInterval,
+} from "../../common/utils/schedule.util";
 import { PrismaService } from "../../common/services/prisma.service";
 import { MailService } from "../../mail/mail.service";
 import { AuditLogService } from "../audit-log/audit-log.service";
@@ -69,6 +75,40 @@ const VALID_TRANSITIONS: Record<EventStatus, EventStatus[]> = {
   CANCELLED: [],
 };
 
+/**
+ * Caution exigée pour un dossier : le montant saisi sur le dossier fait foi
+ * (c'est celui imprimé sur le devis) ; à défaut, la valeur globale.
+ */
+export function getCautionAmount(folder: {
+  cautionAmount?: Prisma.Decimal | number | null;
+}): number {
+  const own = Number(folder.cautionAmount ?? 0);
+  return own > 0 ? own : Number(process.env.CAUTION_AMOUNT || 200000);
+}
+
+/**
+ * Acompte exigé : le montant saisi sur le dossier s'il existe, sinon 50 %
+ * du total TTC.
+ */
+export function getDepositRequired(folder: {
+  depositAmount?: Prisma.Decimal | number | null;
+  totalTTC: Prisma.Decimal | number;
+}): number {
+  const own = Number(folder.depositAmount ?? 0);
+  return own > 0 ? own : Number(folder.totalTTC) * 0.5;
+}
+
+/**
+ * Clé du verrou PostgreSQL qui sérialise les opérations réservant la salle
+ * (création, changement de dates, passage en QUOTED). Sans lui, deux
+ * réservations simultanées passaient toutes deux la vérification de
+ * disponibilité, et deux créations pouvaient obtenir le même numéro.
+ */
+const BOOKING_LOCK_KEY = 42071301;
+
+/** Tolérance d'arrondi sur les comparaisons de montants (XOF). */
+const AMOUNT_EPSILON = 0.5;
+
 @Injectable()
 export class EventFolderService {
   private readonly logger = new Logger(EventFolderService.name);
@@ -81,6 +121,23 @@ export class EventFolderService {
   ) {}
 
   // ==================== HELPERS ====================
+
+  /** Verrou transactionnel : libéré automatiquement en fin de transaction. */
+  private async lockBooking(tx: Prisma.TransactionClient) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${BOOKING_LOCK_KEY})`;
+  }
+
+  private async assertAvailable(
+    schedules: { date: string | Date; startTime: string; endTime: string }[],
+    excludeId: string | undefined,
+    tx: Prisma.TransactionClient,
+  ) {
+    if (!(await this.checkAvailability(schedules, excludeId, tx))) {
+      throw new ConflictException(
+        "La salle n'est pas disponible pour les dates sélectionnées",
+      );
+    }
+  }
 
   private async generateNumber(
     tx?: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
@@ -180,15 +237,12 @@ export class EventFolderService {
       }
     }
 
-    // Check availability
-    const isAvailable = await this.checkAvailability(dto.schedules);
-    if (!isAvailable) {
-      throw new ConflictException(
-        "La salle n'est pas disponible pour les dates sélectionnées",
-      );
-    }
-
     const result = await this.prisma.$transaction(async (tx) => {
+      // 0) Disponibilité vérifiée sous verrou, dans la même transaction que
+      //    la création (et que la génération du numéro de dossier).
+      await this.lockBooking(tx);
+      await this.assertAvailable(dto.schedules, undefined, tx);
+
       // 1) Resolve or create user
       let userId = dto.userId;
       let isNewClient = false;
@@ -427,18 +481,19 @@ export class EventFolderService {
       };
     }
 
+    const { skip, take } = pageParams(options?.skip, options?.take);
     const [data, total] = await Promise.all([
       this.prisma.eventFolder.findMany({
         where,
         include: this.fullInclude(),
         orderBy: { createdAt: "desc" },
-        skip: options?.skip || 0,
-        take: options?.take || 50,
+        skip,
+        take,
       }),
       this.prisma.eventFolder.count({ where }),
     ]);
 
-    return { data, total, skip: options?.skip || 0, take: options?.take || 50 };
+    return { data, total, skip, take };
   }
 
   async findOne(id: string) {
@@ -456,6 +511,90 @@ export class EventFolderService {
   // ==================== UPDATE ====================
 
   async update(id: string, dto: UpdateEventFolderDto, updatedBy?: string) {
+    const updated = await this.applyUpdate(id, dto, updatedBy);
+
+    const pricingTouched =
+      dto.items !== undefined ||
+      dto.totalAmount !== undefined ||
+      dto.discountAmount !== undefined ||
+      dto.depositAmount !== undefined ||
+      dto.cautionAmount !== undefined;
+
+    if (pricingTouched && (await this.resyncPendingPayments(id))) {
+      return this.findOne(id);
+    }
+    return updated;
+  }
+
+  /**
+   * Réaligne les paiements EN ATTENTE sur les montants actuels du dossier
+   * (après un changement de prix, de remise, d'acompte ou de caution).
+   * Les paiements déjà validés ne sont jamais modifiés : le solde en attente
+   * absorbe la différence. Renvoie true si au moins un montant a changé.
+   */
+  private async resyncPendingPayments(id: string): Promise<boolean> {
+    const folder = await this.prisma.eventFolder.findUnique({
+      where: { id },
+      include: { payments: true },
+    });
+    if (!folder || folder.payments.length === 0) return false;
+
+    const sum = (type: PaymentType, status: PaymentStatus) =>
+      folder.payments
+        .filter((p) => p.type === type && p.status === status)
+        .reduce((acc, p) => acc + Number(p.amount), 0);
+    const pendingOf = (type: PaymentType) =>
+      folder.payments.filter(
+        (p) => p.type === type && p.status === PaymentStatus.PENDING,
+      );
+
+    const totalTTC = Number(folder.totalTTC);
+    const acomptePaid = sum(PaymentType.ACOMPTE, PaymentStatus.PAID);
+    const soldePaid = sum(PaymentType.SOLDE, PaymentStatus.PAID);
+    const cautionPaid = sum(PaymentType.CAUTION, PaymentStatus.PAID);
+
+    // Montant restant à percevoir pour chaque type
+    const acompteTarget = Math.max(
+      0,
+      Math.min(getDepositRequired(folder), totalTTC) - acomptePaid,
+    );
+    const pendingAcompte = pendingOf(PaymentType.ACOMPTE);
+    const acompteDue = pendingAcompte.length > 0 ? acompteTarget : 0;
+    const soldeTarget = Math.max(
+      0,
+      totalTTC - acomptePaid - soldePaid - acompteDue,
+    );
+    const cautionTarget = Math.max(0, getCautionAmount(folder) - cautionPaid);
+
+    const updates: Prisma.PrismaPromise<unknown>[] = [];
+    const align = (type: PaymentType, target: number) => {
+      const pending = pendingOf(type);
+      if (pending.length !== 1) return; // échéancier personnalisé : on n'y touche pas
+      if (Math.abs(Number(pending[0].amount) - target) < AMOUNT_EPSILON) return;
+      updates.push(
+        this.prisma.payment.update({
+          where: { id: pending[0].id },
+          data: { amount: new Prisma.Decimal(target) },
+        }),
+      );
+    };
+    align(PaymentType.ACOMPTE, acompteTarget);
+    align(PaymentType.SOLDE, soldeTarget);
+    align(PaymentType.CAUTION, cautionTarget);
+
+    if (updates.length === 0) return false;
+    await this.prisma.$transaction(updates);
+    this.logger.log(
+      `Dossier ${folder.folderNumber} : ${updates.length} paiement(s) en attente recalculé(s)`,
+    );
+    return true;
+  }
+
+  private async applyUpdate(
+    id: string,
+    dto: UpdateEventFolderDto,
+    updatedBy?: string,
+  ) {
     const folder = await this.findOne(id);
 
     // If dates changed, re-check availability
@@ -471,13 +610,6 @@ export class EventFolderService {
             "L'heure de fin doit être différente de l'heure de début pour chaque jour",
           );
         }
-      }
-
-      const isAvailable = await this.checkAvailability(dto.schedules, id);
-      if (!isAvailable) {
-        throw new ConflictException(
-          "La salle n'est pas disponible pour les dates sélectionnées",
-        );
       }
     }
 
@@ -539,6 +671,12 @@ export class EventFolderService {
     // If items or schedules provided, handle in transaction
     if (dto.items || dto.schedules) {
       return this.prisma.$transaction(async (tx) => {
+        // Nouvelles dates : disponibilité vérifiée sous verrou
+        if (dto.schedules) {
+          await this.lockBooking(tx);
+          await this.assertAvailable(dto.schedules, id, tx);
+        }
+
         // Recreate items if provided
         if (dto.items) {
           await tx.eventFolderItem.deleteMany({
@@ -602,18 +740,33 @@ export class EventFolderService {
       );
     }
 
-    // Check no PAID payments
-    const paidPayments = await this.prisma.payment.count({
-      where: { eventFolderId: id, status: PaymentStatus.PAID },
+    // Un paiement validé ou remboursé est une trace comptable : on la garde.
+    const settledPayments = await this.prisma.payment.count({
+      where: {
+        eventFolderId: id,
+        status: { in: [PaymentStatus.PAID, PaymentStatus.REFUNDED] },
+      },
     });
 
-    if (paidPayments > 0) {
+    if (settledPayments > 0) {
       throw new BadRequestException(
-        "Impossible de supprimer un dossier avec des paiements validés",
+        "Impossible de supprimer un dossier avec des paiements validés ou remboursés. Annulez-le plutôt.",
       );
     }
 
-    await this.prisma.eventFolder.delete({ where: { id } });
+    // Les paiements en attente et les avis ne sont pas supprimés en cascade
+    // par la base (FK sans onDelete) : sans ce nettoyage, la suppression
+    // échouait en erreur 500 dès qu'un échéancier avait été généré.
+    await this.prisma.$transaction([
+      this.prisma.payment.deleteMany({
+        where: { eventFolderId: id, status: PaymentStatus.PENDING },
+      }),
+      this.prisma.feedback.updateMany({
+        where: { eventFolderId: id },
+        data: { eventFolderId: null },
+      }),
+      this.prisma.eventFolder.delete({ where: { id } }),
+    ]);
   }
 
   // ==================== QUOTE / PDF / EMAIL ====================
@@ -661,9 +814,7 @@ export class EventFolderService {
       .toLocaleDateString("fr-FR", { month: "long", year: "numeric" })
       .toUpperCase();
 
-    const cautionAmount = Number(
-      folder.cautionAmount || process.env.CAUTION_AMOUNT || 200000,
-    );
+    const cautionAmount = getCautionAmount(folder);
 
     return this.pdfService.generateQuotePdf({
       number: folder.folderNumber,
@@ -770,11 +921,11 @@ export class EventFolderService {
           _sum: { amount: true },
         });
         const acompteAmount = Number(acomptePaid._sum.amount || 0);
-        const requiredAcompte = Number(folder.totalTTC) * 0.5;
+        const requiredAcompte = getDepositRequired(folder);
 
-        if (acompteAmount < requiredAcompte) {
+        if (acompteAmount + AMOUNT_EPSILON < requiredAcompte) {
           throw new BadRequestException(
-            `Acompte insuffisant. Requis : ${requiredAcompte.toFixed(0)} XOF (50%), ` +
+            `Acompte insuffisant. Requis : ${requiredAcompte.toFixed(0)} XOF, ` +
               `Payé : ${acompteAmount.toFixed(0)} XOF`,
           );
         }
@@ -794,22 +945,30 @@ export class EventFolderService {
           .filter((p) => p.type === PaymentType.CAUTION)
           .reduce((sum, p) => sum + Number(p.amount), 0);
 
-        if (soldePaid <= 0) {
+        const acomptePaid = payments
+          .filter((p) => p.type === PaymentType.ACOMPTE)
+          .reduce((sum, p) => sum + Number(p.amount), 0);
+
+        // Le total du dossier doit être intégralement réglé (acompte + solde).
+        // Avant, n'importe quel solde > 0 suffisait.
+        const totalTTC = Number(folder.totalTTC);
+        const totalPaid = acomptePaid + soldePaid;
+        if (totalPaid + AMOUNT_EPSILON < totalTTC) {
           throw new BadRequestException(
-            "Le solde doit être payé pour passer en READY",
-          );
-        }
-        if (cautionPaid <= 0) {
-          throw new BadRequestException(
-            "La caution doit être payée pour passer en READY",
+            `Le dossier n'est pas soldé. Total : ${totalTTC.toFixed(0)} XOF, ` +
+              `payé : ${totalPaid.toFixed(0)} XOF, reste : ${(totalTTC - totalPaid).toFixed(0)} XOF`,
           );
         }
 
-        // Auto-complete any remaining checklist items
-        await this.prisma.checklistItem.updateMany({
-          where: { eventFolderId: id, completed: false },
-          data: { completed: true, completedAt: new Date() },
-        });
+        const cautionRequired = getCautionAmount(folder);
+        if (cautionPaid + AMOUNT_EPSILON < cautionRequired) {
+          throw new BadRequestException(
+            `Caution incomplète. Requise : ${cautionRequired.toFixed(0)} XOF, ` +
+              `payée : ${cautionPaid.toFixed(0)} XOF`,
+          );
+        }
+        // La checklist n'est plus cochée automatiquement : ce sont les tâches
+        // de préparation de la salle, vérifiées au passage en COMPLETED.
         break;
       }
 
@@ -819,13 +978,18 @@ export class EventFolderService {
             "Aucun horaire défini pour cet événement",
           );
         }
-        const lastSchedule = folder.schedules.sort(
-          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
-        )[0];
+        // Fin réelle du dernier créneau (heure de fin, lendemain si le
+        // créneau passe minuit). Avant, seule la date était comparée : on
+        // pouvait clôturer l'événement dès le matin du jour J.
+        const lastEnd = Math.max(
+          ...folder.schedules.map((s) =>
+            this.toInterval(s.date, s.startTime, s.endTime)[1].getTime(),
+          ),
+        );
 
-        if (new Date(lastSchedule.date) > new Date()) {
+        if (lastEnd > Date.now()) {
           throw new BadRequestException(
-            "L'événement n'est pas encore terminé (date de fin dans le futur)",
+            `L'événement n'est pas encore terminé (fin prévue le ${new Date(lastEnd).toLocaleString("fr-FR", { timeZone: "Africa/Abidjan" })})`,
           );
         }
 
@@ -847,17 +1011,30 @@ export class EventFolderService {
       }
     }
 
-    // Perform the transition
-    const updated = await this.prisma.eventFolder.update({
-      where: { id },
-      data: {
-        status: targetStatus,
-        ...(targetStatus === EventStatus.QUOTED && !folder.contractSentAt
-          ? { contractSentAt: new Date() }
-          : {}),
-        updatedBy,
-      },
-      include: this.fullInclude(),
+    // Perform the transition. Un dossier PROSPECT ne bloque pas la salle ;
+    // en passant QUOTED il commence à la bloquer : on revérifie donc la
+    // disponibilité (avant, un PROSPECT pouvait passer QUOTED sur une date
+    // déjà réservée par un autre dossier).
+    const startsBlockingRoom =
+      currentStatus === EventStatus.PROSPECT &&
+      targetStatus === EventStatus.QUOTED;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (startsBlockingRoom) {
+        await this.lockBooking(tx);
+        await this.assertAvailable(folder.schedules, id, tx);
+      }
+      return tx.eventFolder.update({
+        where: { id },
+        data: {
+          status: targetStatus,
+          ...(targetStatus === EventStatus.QUOTED && !folder.contractSentAt
+            ? { contractSentAt: new Date() }
+            : {}),
+          updatedBy,
+        },
+        include: this.fullInclude(),
+      });
     });
 
     this.logger.log(
@@ -955,7 +1132,8 @@ export class EventFolderService {
     });
 
     const totalTTC = Number(folder.totalTTC);
-    const acompteRequired = totalTTC * 0.5;
+    const acompteRequired = getDepositRequired(folder);
+    const cautionRequired = getCautionAmount(folder);
 
     const acomptePaid = payments
       .filter(
@@ -988,6 +1166,7 @@ export class EventFolderService {
       soldePaid,
       soldeRemaining: Math.max(0, soldeRemaining),
       cautionPaid,
+      cautionRequired,
       totalPaid,
       isFullyPaid: soldeRemaining <= 0,
       payments: payments.map((p) => ({
@@ -1021,9 +1200,9 @@ export class EventFolderService {
       );
     }
 
-    const acompte = totalTTC * 0.5;
+    const acompte = Math.min(getDepositRequired(folder), totalTTC);
     const solde = totalTTC - acompte;
-    const caution = Number(process.env.CAUTION_AMOUNT || 200000); // Défaut 200 000 XOF (cf. devis/contrat)
+    const caution = getCautionAmount(folder);
 
     if (!folder.schedules || folder.schedules.length === 0) {
       throw new BadRequestException("Le dossier n'a pas d'horaires définis.");
@@ -1074,34 +1253,19 @@ export class EventFolderService {
 
   // ==================== AVAILABILITY & CALENDAR ====================
 
-  /**
-   * Construit un intervalle datetime absolu [start, end) à partir d'une date
-   * (jour) et de deux heures "HH:MM". Si endTime <= startTime, l'événement passe
-   * minuit : la fin est repoussée au lendemain (overnight).
-   */
+  /** Voir common/utils/schedule.util.ts (partagé avec l'inventaire). */
   private toInterval(
     date: string | Date,
     startTime: string,
     endTime: string,
   ): [Date, Date] {
-    const base = new Date(date);
-    base.setHours(0, 0, 0, 0);
-    const [sh, sm] = startTime.split(":").map(Number);
-    const [eh, em] = endTime.split(":").map(Number);
-    const start = new Date(base);
-    start.setHours(sh, sm, 0, 0);
-    const end = new Date(base);
-    end.setHours(eh, em, 0, 0);
-    if (end <= start) {
-      // Passe minuit → se termine le lendemain.
-      end.setDate(end.getDate() + 1);
-    }
-    return [start, end];
+    return toInterval(date, startTime, endTime);
   }
 
   async checkAvailability(
     schedules: { date: string | Date; startTime: string; endTime: string }[],
     excludeId?: string,
+    db: Prisma.TransactionClient = this.prisma,
   ): Promise<boolean> {
     if (!schedules.length) return true;
 
@@ -1131,7 +1295,7 @@ export class EventFolderService {
     maxDate.setDate(maxDate.getDate() + 1);
     maxDate.setHours(23, 59, 59, 999);
 
-    const existing = await this.prisma.eventSchedule.findMany({
+    const existing = await db.eventSchedule.findMany({
       where: {
         date: { gte: minDate, lte: maxDate },
         eventFolder: {
@@ -1209,9 +1373,11 @@ export class EventFolderService {
     const schedules = await this.prisma.eventSchedule.findMany({
       where: {
         date: { gte: startOfMonth, lte: endOfMonth },
+        // Mêmes statuts que checkAvailability : un dossier QUOTED bloque la
+        // salle, il doit donc apparaître comme pris dans le calendrier public.
         eventFolder: {
           status: {
-            in: [EventStatus.BOOKED, EventStatus.READY],
+            in: [EventStatus.QUOTED, EventStatus.BOOKED, EventStatus.READY],
           },
         },
       },
@@ -1224,27 +1390,87 @@ export class EventFolderService {
 
   // ==================== EQUIPMENT MANAGEMENT ====================
 
-  async addEquipment(eventFolderId: string, dto: AddEquipmentDto) {
-    // Verify event folder exists
-    await this.findOne(eventFolderId);
+  /**
+   * Quantité d'un matériel interne encore libre sur les créneaux d'un dossier
+   * (stock total − réservations des autres dossiers actifs qui chevauchent).
+   * Le stock n'est plus un compteur global décrémenté à l'assignation :
+   * il était bloqué quelles que soient les dates et fuyait à chaque
+   * annulation ou suppression de dossier.
+   */
+  private async availableForFolder(
+    db: Prisma.TransactionClient,
+    item: { id: string; totalStock: number },
+    folder: {
+      id: string;
+      schedules: { date: Date | string; startTime: string; endTime: string }[];
+    },
+  ): Promise<number> {
+    const reservations = await db.eventEquipment.findMany({
+      where: { inventoryItemId: item.id, eventFolderId: { not: folder.id } },
+      select: {
+        quantityReserved: true,
+        eventFolderId: true,
+        eventFolder: {
+          select: {
+            status: true,
+            schedules: {
+              select: { date: true, startTime: true, endTime: true },
+            },
+          },
+        },
+      },
+    });
+    return (
+      item.totalStock -
+      reservedOverlapping(
+        reservations,
+        intervalsOf(folder.schedules),
+        folder.id,
+      )
+    );
+  }
 
-    // Verify inventory item exists and has stock
+  /** Vérifie (sous verrou) qu'une quantité de matériel interne est libre. */
+  private async assertEquipmentAvailable(
+    tx: Prisma.TransactionClient,
+    item: {
+      id: string;
+      name: string;
+      type: string;
+      status: string;
+      totalStock: number;
+    },
+    folder: {
+      id: string;
+      schedules: { date: Date | string; startTime: string; endTime: string }[];
+    },
+    quantity: number,
+  ) {
+    if (item.type !== "INTERNAL") return; // géré par le prestataire
+    if (item.status !== "AVAILABLE") {
+      throw new BadRequestException(
+        `« ${item.name} » n'est pas disponible (statut : ${item.status})`,
+      );
+    }
+    const available = await this.availableForFolder(tx, item, folder);
+    if (available < quantity) {
+      throw new BadRequestException(
+        `Stock insuffisant pour « ${item.name} » sur ces dates. ` +
+          `Disponible : ${Math.max(0, available)}, demandé : ${quantity}`,
+      );
+    }
+  }
+
+  async addEquipment(eventFolderId: string, dto: AddEquipmentDto) {
+    const folder = await this.findOne(eventFolderId);
+
     const item = await this.prisma.inventoryItem.findUnique({
       where: { id: dto.inventoryItemId },
     });
     if (!item) {
       throw new NotFoundException("Équipement introuvable dans l'inventaire");
     }
-    if (
-      item.type === "INTERNAL" &&
-      item.availableStock < dto.quantityReserved
-    ) {
-      throw new BadRequestException(
-        `Stock insuffisant. Disponible : ${item.availableStock}, Demandé : ${dto.quantityReserved}`,
-      );
-    }
 
-    // Check if already assigned
     const existing = await this.prisma.eventEquipment.findUnique({
       where: {
         eventFolderId_inventoryItemId: {
@@ -1259,8 +1485,15 @@ export class EventFolderService {
       );
     }
 
-    const [equipment] = await this.prisma.$transaction([
-      this.prisma.eventEquipment.create({
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockBooking(tx);
+      await this.assertEquipmentAvailable(
+        tx,
+        item,
+        folder,
+        dto.quantityReserved,
+      );
+      return tx.eventEquipment.create({
         data: {
           eventFolderId,
           inventoryItemId: dto.inventoryItemId,
@@ -1268,21 +1501,8 @@ export class EventFolderService {
           notes: dto.notes,
         },
         include: { inventoryItem: true },
-      }),
-      // Update available stock
-      ...(item.type === "INTERNAL"
-        ? [
-            this.prisma.inventoryItem.update({
-              where: { id: dto.inventoryItemId },
-              data: {
-                availableStock: { decrement: dto.quantityReserved },
-              },
-            }),
-          ]
-        : []),
-    ]);
-
-    return equipment;
+      });
+    });
   }
 
   async updateEquipment(
@@ -1299,68 +1519,67 @@ export class EventFolderService {
       throw new NotFoundException("Assignation d'équipement introuvable");
     }
 
-    // If quantity changed, update stock
-    if (
-      dto.quantityReserved !== undefined &&
-      dto.quantityReserved !== equipment.quantityReserved &&
-      equipment.inventoryItem.type === "INTERNAL"
-    ) {
-      const diff = dto.quantityReserved - equipment.quantityReserved;
-      if (diff > 0 && equipment.inventoryItem.availableStock < diff) {
-        throw new BadRequestException(
-          `Stock insuffisant. Disponible : ${equipment.inventoryItem.availableStock}`,
-        );
-      }
-
-      await this.prisma.inventoryItem.update({
-        where: { id: equipment.inventoryItemId },
-        data: { availableStock: { decrement: diff } },
-      });
+    const quantity = dto.quantityReserved ?? equipment.quantityReserved;
+    const returned = dto.returnedQuantity ?? equipment.returnedQuantity;
+    if (returned > quantity) {
+      throw new BadRequestException(
+        `Quantité retournée (${returned}) supérieure à la quantité réservée (${quantity})`,
+      );
     }
 
-    return this.prisma.eventEquipment.update({
-      where: { id: equipmentId },
-      data: {
-        ...(dto.quantityReserved !== undefined && {
-          quantityReserved: dto.quantityReserved,
-        }),
-        ...(dto.returnedQuantity !== undefined && {
-          returnedQuantity: dto.returnedQuantity,
-        }),
-        ...(dto.notes !== undefined && { notes: dto.notes }),
-      },
-      include: { inventoryItem: true },
+    return this.prisma.$transaction(async (tx) => {
+      if (
+        dto.quantityReserved !== undefined &&
+        dto.quantityReserved > equipment.quantityReserved
+      ) {
+        const folder = await tx.eventFolder.findUniqueOrThrow({
+          where: { id: eventFolderId },
+          select: { id: true, schedules: true },
+        });
+        await this.lockBooking(tx);
+        await this.assertEquipmentAvailable(
+          tx,
+          equipment.inventoryItem,
+          folder,
+          dto.quantityReserved,
+        );
+      }
+      return tx.eventEquipment.update({
+        where: { id: equipmentId },
+        data: {
+          ...(dto.quantityReserved !== undefined && {
+            quantityReserved: dto.quantityReserved,
+          }),
+          ...(dto.returnedQuantity !== undefined && {
+            returnedQuantity: dto.returnedQuantity,
+          }),
+          ...(dto.notes !== undefined && { notes: dto.notes }),
+        },
+        include: { inventoryItem: true },
+      });
     });
   }
 
   async removeEquipment(eventFolderId: string, equipmentId: string) {
     const equipment = await this.prisma.eventEquipment.findFirst({
       where: { id: equipmentId, eventFolderId },
-      include: { inventoryItem: true },
     });
 
     if (!equipment) {
       throw new NotFoundException("Assignation d'équipement introuvable");
     }
 
-    await this.prisma.$transaction([
-      this.prisma.eventEquipment.delete({ where: { id: equipmentId } }),
-      // Restore stock
-      ...(equipment.inventoryItem.type === "INTERNAL"
-        ? [
-            this.prisma.inventoryItem.update({
-              where: { id: equipment.inventoryItemId },
-              data: {
-                availableStock: {
-                  increment: equipment.quantityReserved,
-                },
-              },
-            }),
-          ]
-        : []),
-    ]);
+    // Plus de « restitution » de stock : la disponibilité est calculée à
+    // partir des assignations, supprimer l'assignation suffit (avant, un
+    // retour partiel suivi d'une suppression comptait le matériel deux fois).
+    await this.prisma.eventEquipment.delete({ where: { id: equipmentId } });
   }
 
+  /**
+   * Enregistre le retour du matériel après l'événement. La quantité non
+   * retournée (réservée − retournée) reste visible sur l'assignation : à
+   * l'admin d'ajuster le stock total ou de passer l'article en LOST.
+   */
   async returnEquipment(
     eventFolderId: string,
     equipmentId: string,
@@ -1369,7 +1588,6 @@ export class EventFolderService {
   ) {
     const equipment = await this.prisma.eventEquipment.findFirst({
       where: { id: equipmentId, eventFolderId },
-      include: { inventoryItem: true },
     });
 
     if (!equipment) {
@@ -1382,31 +1600,14 @@ export class EventFolderService {
       );
     }
 
-    const [updated] = await this.prisma.$transaction([
-      this.prisma.eventEquipment.update({
-        where: { id: equipmentId },
-        data: {
-          returnedQuantity,
-          notes: notes || equipment.notes,
-        },
-        include: { inventoryItem: true },
-      }),
-      // Restore returned quantity to stock
-      ...(equipment.inventoryItem.type === "INTERNAL"
-        ? [
-            this.prisma.inventoryItem.update({
-              where: { id: equipment.inventoryItemId },
-              data: {
-                availableStock: {
-                  increment: returnedQuantity - equipment.returnedQuantity,
-                },
-              },
-            }),
-          ]
-        : []),
-    ]);
-
-    return updated;
+    return this.prisma.eventEquipment.update({
+      where: { id: equipmentId },
+      data: {
+        returnedQuantity,
+        notes: notes || equipment.notes,
+      },
+      include: { inventoryItem: true },
+    });
   }
 
   // ==================== STATS ====================
@@ -1445,16 +1646,24 @@ export class EventFolderService {
   }
 
   async getUpcoming(days = 30) {
-    const future = new Date();
+    // Début de journée : la colonne `date` n'a pas d'heure, un événement du
+    // jour (00:00) était exclu avec `gte: now`.
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const future = new Date(today);
     future.setDate(future.getDate() + days);
 
-    return this.prisma.eventFolder.findMany({
+    const folders = await this.prisma.eventFolder.findMany({
       where: {
-        schedules: { some: { date: { gte: new Date(), lte: future } } },
+        schedules: { some: { date: { gte: today, lte: future } } },
         status: { in: [EventStatus.BOOKED, EventStatus.READY] },
       },
       include: this.fullInclude(),
-      orderBy: { createdAt: "asc" },
     });
+
+    // Tri par date du premier créneau (avant : par date de création).
+    const firstDate = (f: (typeof folders)[number]) =>
+      Math.min(...f.schedules.map((s) => new Date(s.date).getTime()));
+    return folders.sort((a, b) => firstDate(a) - firstDate(b));
   }
 }

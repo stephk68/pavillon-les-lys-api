@@ -28,3 +28,13 @@ export class UpdateEquipmentDto {
   @IsString()
   notes?: string;
 }
+
+export class ReturnEquipmentDto {
+  @IsInt()
+  @Min(0)
+  returnedQuantity: number;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}

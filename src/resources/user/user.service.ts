@@ -8,6 +8,7 @@ import { Role, User } from "@prisma/client";
 import * as bcrypt from "bcrypt";
 import * as crypto from "crypto";
 import { PrismaService } from "../../common/services/prisma.service";
+import { pageParams } from "../../common/utils/pagination.util";
 import { MailService } from "../../mail/mail.service";
 import { CreateStaffDto } from "./dto/create-staff.dto";
 import { CreateUserDto } from "./dto/create-user.dto";
@@ -23,6 +24,23 @@ export type SafeUser = Omit<
   | "resetToken"
   | "resetTokenExpiry"
 >;
+
+/** Champs renvoyés pour un utilisateur (aucun champ sensible). */
+const SAFE_USER_SELECT = {
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  phone: true,
+  role: true,
+  isActive: true,
+  isFirstLogin: true,
+  lastLoginAt: true,
+  createdAt: true,
+  updatedAt: true,
+  createdBy: true,
+  updatedBy: true,
+} as const;
 
 @Injectable()
 export class UserService {
@@ -79,16 +97,8 @@ export class UserService {
 
   async createStaff(
     createStaffDto: CreateStaffDto,
+    actorId?: string,
   ): Promise<SafeUser> {
-    // Vérifier si l'utilisateur existe déjà
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email: createStaffDto.email },
-    });
-
-    if (existingUser) {
-      throw new ConflictException("Un utilisateur avec cet email existe déjà");
-    }
-
     // Valider que le rôle est ADMIN ou EVENT_MANAGER
     if (
       !createStaffDto.role ||
@@ -96,6 +106,36 @@ export class UserService {
         createStaffDto.role !== Role.EVENT_MANAGER)
     ) {
       throw new BadRequestException("Le rôle doit être ADMIN ou EVENT_MANAGER");
+    }
+
+    // Vérifier si l'utilisateur existe déjà
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: createStaffDto.email },
+    });
+
+    if (existingUser) {
+      if (existingUser.role !== Role.CLIENT) {
+        throw new ConflictException(
+          "Cette personne fait déjà partie de l'équipe",
+        );
+      }
+      // L'email appartient à un client : on demande d'abord confirmation au
+      // créateur (code EXISTING_CLIENT, géré par le backoffice), puis on
+      // promeut le compte existant au lieu de refuser.
+      if (!createStaffDto.confirmPromotion) {
+        throw new ConflictException({
+          statusCode: 409,
+          code: "EXISTING_CLIENT",
+          message:
+            "Cet email appartient déjà à un client. Confirmez pour lui attribuer ce rôle.",
+          existingUser: {
+            firstName: existingUser.firstName,
+            lastName: existingUser.lastName,
+            email: existingUser.email,
+          },
+        });
+      }
+      return this.promoteClientToStaff(existingUser, createStaffDto.role, actorId);
     }
 
     // Générer un mot de passe temporaire aléatoire sécurisé (jamais divulgué)
@@ -137,8 +177,44 @@ export class UserService {
     return user;
   }
 
+  /**
+   * Promeut un client existant en membre du staff. Le compte (mot de passe,
+   * dossiers, paiements) est conservé ; seul le rôle change, avec effet
+   * immédiat puisque le guard relit le rôle en base à chaque requête.
+   */
+  private async promoteClientToStaff(
+    client: User,
+    role: Role,
+    actorId?: string,
+  ): Promise<SafeUser> {
+    const user = await this.prisma.user.update({
+      where: { id: client.id },
+      data: { role, isActive: true, updatedBy: actorId },
+      select: SAFE_USER_SELECT,
+    });
+
+    if (actorId) {
+      await this.prisma.auditLog
+        .create({
+          data: {
+            action: "USER_PROMOTED",
+            description: `${client.firstName} ${client.lastName} (client) promu ${role === Role.ADMIN ? "administrateur" : "gestionnaire"}`,
+            entityType: "User",
+            entityId: client.id,
+            userId: actorId,
+            metadata: { previousRole: client.role, newRole: role },
+          },
+        })
+        .catch(() => {});
+    }
+
+    this.mailService.sendStaffWelcomeEmail(user).catch(() => {});
+    return user;
+  }
+
   async findAll(options?: { role?: Role; skip?: number; take?: number }) {
-    const { role, skip = 0, take = 50 } = options || {};
+    const { role } = options || {};
+    const { skip, take } = pageParams(options?.skip, options?.take);
 
     const where = role ? { role } : undefined;
 
@@ -219,6 +295,17 @@ export class UserService {
     }
 
     return user;
+  }
+
+  /**
+   * Utilisateur pour le guard d'authentification (appelé à chaque requête) :
+   * sans la liste des dossiers que charge findOne.
+   */
+  async findAuthUser(id: string): Promise<SafeUser | null> {
+    return this.prisma.user.findUnique({
+      where: { id },
+      select: SAFE_USER_SELECT,
+    });
   }
 
   async findByEmail(email: string): Promise<User | null> {
@@ -304,17 +391,28 @@ export class UserService {
     // Vérifier si l'utilisateur existe
     await this.findOne(id);
 
-    // Vérifier s'il a des dossiers événement actifs
-    const activeFolders = await this.prisma.eventFolder.findMany({
-      where: {
-        userId: id,
-        status: { in: ["QUOTED", "BOOKED", "READY"] },
-      },
-    });
+    // Un compte qui a un historique (dossiers, paiements, avis, actions
+    // tracées) ne peut pas être supprimé : les clés étrangères l'interdisent
+    // et cet historique doit être conservé. Avant, la suppression échouait en
+    // erreur 500 ; on renvoie maintenant un message clair.
+    const [folders, payments, feedbacks, auditLogs] = await Promise.all([
+      this.prisma.eventFolder.count({ where: { userId: id } }),
+      this.prisma.payment.count({ where: { userId: id } }),
+      this.prisma.feedback.count({ where: { userId: id } }),
+      this.prisma.auditLog.count({ where: { userId: id } }),
+    ]);
 
-    if (activeFolders.length > 0) {
+    if (folders + payments + feedbacks + auditLogs > 0) {
+      const details = [
+        folders && `${folders} dossier(s)`,
+        payments && `${payments} paiement(s)`,
+        feedbacks && `${feedbacks} avis`,
+        auditLogs && `${auditLogs} action(s) tracée(s)`,
+      ]
+        .filter(Boolean)
+        .join(", ");
       throw new BadRequestException(
-        "Impossible de supprimer cet utilisateur car il a des dossiers événement actifs",
+        `Impossible de supprimer ce compte : il possède un historique (${details}). Désactivez-le plutôt.`,
       );
     }
 
@@ -336,6 +434,7 @@ export class UserService {
       where: {
         eventFolder: { userId: id },
         status: "PAID",
+        type: { not: "CAUTION" }, // la caution est restituable
       },
       _sum: {
         amount: true,

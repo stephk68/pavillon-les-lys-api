@@ -5,6 +5,12 @@ import {
 } from "@nestjs/common";
 import { InventoryItemStatus, InventoryItemType, Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/services/prisma.service";
+import {
+  EQUIPMENT_HOLDING_STATUSES,
+  intervalsOf,
+  reservedOverlapping,
+  upcomingPeakReserved,
+} from "../../common/utils/schedule.util";
 
 @Injectable()
 export class InventoryService {
@@ -18,6 +24,8 @@ export class InventoryService {
     status?: InventoryItemStatus;
     category?: string;
     search?: string;
+    /** Disponibilité calculée pour les créneaux de ce dossier. */
+    forFolderId?: string;
   }) {
     const where: Prisma.InventoryItemWhereInput = {};
 
@@ -52,6 +60,7 @@ export class InventoryService {
           include: {
             eventFolder: {
               select: {
+                id: true,
                 schedules: {
                   select: {
                     date: true,
@@ -70,21 +79,40 @@ export class InventoryService {
       },
     });
 
-    // Calcul du stock disponible pour chaque item
+    // Créneaux du dossier ciblé (assignation de matériel depuis un dossier)
+    const folderIntervals = filters.forFolderId
+      ? intervalsOf(
+          (
+            await this.prisma.eventFolder.findUnique({
+              where: { id: filters.forFolderId },
+              select: { schedules: true },
+            })
+          )?.schedules ?? [],
+        )
+      : null;
+
+    // Stock disponible calculé à partir des assignations (plus de compteur) :
+    // - pour un dossier : total − réservations des autres dossiers actifs
+    //   qui chevauchent ses créneaux ;
+    // - sinon : total − pic de réservation à venir (stock garanti libre sur
+    //   toute la période à venir). Les événements passés, annulés ou
+    //   terminés ne comptent plus : le matériel se libère tout seul.
     return items.map((item) => {
       let availableStock = item.totalStock;
 
-      // Pour le matériel interne, calculer le stock disponible
       if (item.type === InventoryItemType.INTERNAL) {
-        const reservedQuantity = item.eventEquipments
-          .filter(
-            (re) =>
-              re.eventFolder.status !== "CANCELLED" &&
-              re.eventFolder.status !== "COMPLETED",
-          )
-          .reduce((sum, re) => sum + re.quantityReserved, 0);
-
-        availableStock = item.totalStock - reservedQuantity;
+        const reservations = item.eventEquipments.map((re) => ({
+          quantityReserved: re.quantityReserved,
+          eventFolderId: re.eventFolderId,
+          eventFolder: re.eventFolder,
+        }));
+        const reserved = folderIntervals
+          ? reservedOverlapping(reservations, folderIntervals, filters.forFolderId)
+          : upcomingPeakReserved(reservations);
+        availableStock =
+          item.status === InventoryItemStatus.AVAILABLE
+            ? Math.max(0, item.totalStock - reserved)
+            : 0;
       }
 
       return {
@@ -230,41 +258,45 @@ export class InventoryService {
       };
     }
 
-    // Pour le matériel interne, calculer les dossiers qui se chevauchent
-    const overlappingEquipments = await this.prisma.eventEquipment.findMany({
+    // Pour le matériel interne : dossiers actifs dont un créneau chevauche
+    // la période demandée (mêmes statuts que l'assignation de matériel).
+    const reservations = await this.prisma.eventEquipment.findMany({
       where: {
         inventoryItemId: id,
+        eventFolder: { status: { in: EQUIPMENT_HOLDING_STATUSES } },
+      },
+      select: {
+        quantityReserved: true,
+        eventFolderId: true,
         eventFolder: {
-          status: {
-            in: ["QUOTED", "BOOKED", "READY"],
+          select: {
+            status: true,
+            schedules: { select: { date: true, startTime: true, endTime: true } },
           },
-          schedules: {
-            some: {
-              date: { gte: start, lte: end }
-            }
-          }
         },
       },
-      include: {
-        eventFolder: true,
-      },
     });
-
-    const reservedQuantity = overlappingEquipments.reduce(
-      (sum, re) => sum + re.quantityReserved,
+    const period: [Date, Date][] = [[start, end]];
+    const overlapping = reservations.filter(
+      (r) => reservedOverlapping([r], period) > 0,
+    );
+    const reservedQuantity = overlapping.reduce(
+      (sum, r) => sum + r.quantityReserved,
       0,
     );
-
-    const availableQuantity = item.totalStock - reservedQuantity;
+    const availableQuantity =
+      item.status === InventoryItemStatus.AVAILABLE
+        ? item.totalStock - reservedQuantity
+        : 0;
 
     return {
       available: availableQuantity > 0,
       totalStock: item.totalStock,
       reservedQuantity,
       availableQuantity,
-      overlappingFolders: overlappingEquipments.map((re) => ({
-        eventFolderId: re.eventFolder.id,
-        quantity: re.quantityReserved,
+      overlappingFolders: overlapping.map((r) => ({
+        eventFolderId: r.eventFolderId,
+        quantity: r.quantityReserved,
       })),
     };
   }

@@ -7,6 +7,7 @@ import {
 import { EventStatus, PaymentStatus, PaymentType, Prisma } from "@prisma/client";
 import { PdfService } from "../../common/services/pdf.service";
 import { PrismaService } from "../../common/services/prisma.service";
+import { pageParams } from "../../common/utils/pagination.util";
 import { MailService } from "../../mail/mail.service";
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { EventFolderService } from "../event-folder/event-folder.service";
@@ -101,8 +102,7 @@ export class PaymentService {
           },
         },
         orderBy: { createdAt: "desc" },
-        skip: options?.skip || 0,
-        take: options?.take || 50,
+        ...pageParams(options?.skip, options?.take),
       }),
       this.prisma.payment.count({ where }),
     ]);
@@ -196,11 +196,16 @@ export class PaymentService {
 
   // ==================== STATUS ====================
 
-  async markAsPaid(id: string) {
+  async markAsPaid(id: string, actorId?: string) {
     const payment = await this.findOne(id);
 
     if (payment.status === PaymentStatus.PAID) {
       throw new BadRequestException("Ce paiement est déjà validé");
+    }
+    if (payment.eventFolder.status === EventStatus.CANCELLED) {
+      throw new BadRequestException(
+        "Impossible de valider un paiement sur un dossier annulé",
+      );
     }
 
     const updated = await this.prisma.payment.update({
@@ -236,7 +241,8 @@ export class PaymentService {
         entityType: "Payment",
         entityId: id,
         folderNumber: updated.eventFolder.folderNumber,
-        userId: payment.userId || updated.eventFolder.user?.id,
+        // Auteur de l'action = le membre du staff qui valide (et non le client)
+        userId: actorId || payment.userId || updated.eventFolder.user?.id,
       })
       .catch(() => {});
 
@@ -267,6 +273,7 @@ export class PaymentService {
         await this.eventFolderService.transitionStatus(
           updated.eventFolder.id,
           EventStatus.BOOKED,
+          actorId,
         );
       } catch (e) {
         this.logger.error(
@@ -278,7 +285,7 @@ export class PaymentService {
     return updated;
   }
 
-  async refund(id: string) {
+  async refund(id: string, actorId?: string) {
     const payment = await this.findOne(id);
 
     if (payment.status !== PaymentStatus.PAID) {
@@ -309,7 +316,9 @@ export class PaymentService {
         entityType: "Payment",
         entityId: id,
         folderNumber: updated.eventFolder.folderNumber,
-        userId: payment.userId || "",
+        // Avant : userId "" → clé étrangère invalide, l'audit échouait en
+        // silence et aucun remboursement n'était tracé.
+        userId: actorId || payment.userId || payment.eventFolder.user?.id,
       })
       .catch(() => {});
 
@@ -339,8 +348,9 @@ export class PaymentService {
         _count: { _all: true },
         _sum: { amount: true },
       }),
+      // Chiffre d'affaires : la caution est un dépôt restituable, pas un revenu.
       this.prisma.payment.aggregate({
-        where: { status: PaymentStatus.PAID },
+        where: { status: PaymentStatus.PAID, type: { not: PaymentType.CAUTION } },
         _sum: { amount: true },
       }),
       this.getMonthlyRevenue(
@@ -367,6 +377,7 @@ export class PaymentService {
     const result = await this.prisma.payment.aggregate({
       where: {
         status: PaymentStatus.PAID,
+        type: { not: PaymentType.CAUTION },
         paidAt: { gte: startOfMonth, lte: endOfMonth },
       },
       _sum: { amount: true },

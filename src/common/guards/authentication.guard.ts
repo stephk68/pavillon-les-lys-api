@@ -58,7 +58,7 @@ export class AuthenticationGuard implements CanActivate {
       );
 
       // Vérifier que l'utilisateur existe toujours
-      const user = await this.userService.findOne(payload.sub);
+      const user = await this.userService.findAuthUser(payload.sub);
       if (!user) {
         this.logger.warn(`❌ Utilisateur introuvable: ${payload.sub}`);
         throw new UnauthorizedException("Utilisateur non trouvé");

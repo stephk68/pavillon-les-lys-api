@@ -16,7 +16,7 @@ describe('AuthenticationGuard', () => {
   };
 
   const mockUserService = {
-    findOne: jest.fn(),
+    findAuthUser: jest.fn(),
   };
 
   const mockReflector = {
@@ -91,7 +91,7 @@ describe('AuthenticationGuard', () => {
       const mockPayload = { sub: 'user-1', email: 'test@example.com' };
 
       mockJwtService.verify.mockReturnValue(mockPayload);
-      mockUserService.findOne.mockResolvedValue(mockUser);
+      mockUserService.findAuthUser.mockResolvedValue(mockUser);
 
       const context = createMockExecutionContext('Bearer valid-token');
 
@@ -101,7 +101,7 @@ describe('AuthenticationGuard', () => {
       // Assert
       expect(result).toBe(true);
       expect(mockJwtService.verify).toHaveBeenCalledWith('valid-token');
-      expect(mockUserService.findOne).toHaveBeenCalledWith('user-1');
+      expect(mockUserService.findAuthUser).toHaveBeenCalledWith('user-1');
       expect(context.switchToHttp().getRequest()['user']).toEqual(mockUser);
     });
 
@@ -139,7 +139,7 @@ describe('AuthenticationGuard', () => {
       const context = createMockExecutionContext('Bearer reset-token');
 
       await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
-      expect(mockUserService.findOne).not.toHaveBeenCalled();
+      expect(mockUserService.findAuthUser).not.toHaveBeenCalled();
     });
 
     it('should reject an otp-verified temp token used as access token', async () => {
@@ -153,7 +153,7 @@ describe('AuthenticationGuard', () => {
     it('should reject a deactivated user even with a valid token', async () => {
       mockReflector.getAllAndOverride.mockReturnValue(false);
       mockJwtService.verify.mockReturnValue({ sub: 'user-1', email: 'test@example.com' });
-      mockUserService.findOne.mockResolvedValue({ id: 'user-1', email: 'test@example.com', isActive: false });
+      mockUserService.findAuthUser.mockResolvedValue({ id: 'user-1', email: 'test@example.com', isActive: false });
       const context = createMockExecutionContext('Bearer valid-token');
 
       await expect(guard.canActivate(context)).rejects.toThrow('Ce compte a été désactivé');
@@ -165,7 +165,7 @@ describe('AuthenticationGuard', () => {
       const mockPayload = { sub: 'user-1', email: 'test@example.com' };
 
       mockJwtService.verify.mockReturnValue(mockPayload);
-      mockUserService.findOne.mockResolvedValue(null);
+      mockUserService.findAuthUser.mockResolvedValue(null);
 
       const context = createMockExecutionContext('Bearer valid-token');
 
@@ -173,7 +173,7 @@ describe('AuthenticationGuard', () => {
       await expect(guard.canActivate(context)).rejects.toThrow(
         UnauthorizedException,
       );
-      expect(mockUserService.findOne).toHaveBeenCalledWith('user-1');
+      expect(mockUserService.findAuthUser).toHaveBeenCalledWith('user-1');
     });
 
     it('should handle malformed authorization header', async () => {

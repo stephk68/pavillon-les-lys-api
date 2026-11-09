@@ -34,13 +34,15 @@ export class InventoryController {
     @Query("type") type?: InventoryItemType,
     @Query("status") status?: InventoryItemStatus,
     @Query("category") category?: string,
-    @Query("search") search?: string
+    @Query("search") search?: string,
+    @Query("forFolderId") forFolderId?: string,
   ) {
     return this.inventoryService.findAll({
       type,
       status,
       category,
       search,
+      forFolderId,
     });
   }
 

@@ -67,9 +67,18 @@ describe("UserService", () => {
       eventFolder: {
         findMany: jest.fn(),
         groupBy: jest.fn(),
+        count: jest.fn(),
       },
       payment: {
         aggregate: jest.fn(),
+        count: jest.fn(),
+      },
+      feedback: {
+        count: jest.fn(),
+      },
+      auditLog: {
+        create: jest.fn().mockResolvedValue({}),
+        count: jest.fn(),
       },
     };
 
@@ -125,6 +134,70 @@ describe("UserService", () => {
         ConflictException,
       );
       expect(prismaService.user.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("createStaff — email déjà client", () => {
+    const dto = {
+      email: "test@example.com",
+      firstName: "Jane",
+      lastName: "Roe",
+      role: Role.EVENT_MANAGER,
+    };
+
+    it("demande une confirmation (409 EXISTING_CLIENT) sans rien modifier", async () => {
+      prismaService.user.findUnique.mockResolvedValue(mockUser);
+
+      await expect(service.createStaff(dto, "admin-1")).rejects.toMatchObject({
+        status: 409,
+        response: expect.objectContaining({
+          code: "EXISTING_CLIENT",
+          existingUser: { firstName: "John", lastName: "Doe", email: "test@example.com" },
+        }),
+      });
+      expect(prismaService.user.update).not.toHaveBeenCalled();
+      expect(prismaService.user.create).not.toHaveBeenCalled();
+    });
+
+    it("promeut le client après confirmation, conserve le compte et trace l'action", async () => {
+      prismaService.user.findUnique.mockResolvedValue(mockUser);
+      prismaService.user.update.mockResolvedValue({
+        ...mockUserWithoutPassword,
+        role: Role.EVENT_MANAGER,
+      });
+
+      const result = await service.createStaff(
+        { ...dto, confirmPromotion: true },
+        "admin-1",
+      );
+
+      expect(result.role).toBe(Role.EVENT_MANAGER);
+      expect(prismaService.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "user-1" },
+          data: { role: Role.EVENT_MANAGER, isActive: true, updatedBy: "admin-1" },
+        }),
+      );
+      // Le mot de passe n'est jamais réécrit lors d'une promotion
+      expect(prismaService.user.update.mock.calls[0][0].data.password).toBeUndefined();
+      expect(prismaService.user.create).not.toHaveBeenCalled();
+      expect(prismaService.auditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ action: "USER_PROMOTED", userId: "admin-1" }),
+        }),
+      );
+    });
+
+    it("refuse si la personne fait déjà partie de l'équipe", async () => {
+      prismaService.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        role: Role.ADMIN,
+      });
+
+      await expect(
+        service.createStaff({ ...dto, confirmPromotion: true }, "admin-1"),
+      ).rejects.toThrow("déjà partie de l'équipe");
+      expect(prismaService.user.update).not.toHaveBeenCalled();
     });
   });
 
@@ -286,40 +359,39 @@ describe("UserService", () => {
   });
 
   describe("remove", () => {
-    it("should remove user successfully when no active folders", async () => {
-      const mockUserWithFolders = {
+    const withoutHistory = () => {
+      prismaService.eventFolder.count.mockResolvedValue(0);
+      prismaService.payment.count.mockResolvedValue(0);
+      prismaService.feedback.count.mockResolvedValue(0);
+      prismaService.auditLog.count.mockResolvedValue(0);
+    };
+
+    it("supprime un compte sans aucun historique", async () => {
+      prismaService.user.findUnique.mockResolvedValue({
         ...mockUserWithoutPassword,
         eventFolders: [],
-      };
-      prismaService.user.findUnique.mockResolvedValue(mockUserWithFolders);
-      prismaService.eventFolder.findMany.mockResolvedValue([]);
+      });
+      withoutHistory();
       prismaService.user.delete.mockResolvedValue(mockUser);
 
       await service.remove("user-1");
 
-      expect(prismaService.eventFolder.findMany).toHaveBeenCalledWith({
-        where: {
-          userId: "user-1",
-          status: { in: ["QUOTED", "BOOKED", "READY"] },
-        },
-      });
       expect(prismaService.user.delete).toHaveBeenCalledWith({
         where: { id: "user-1" },
       });
     });
 
-    it("should throw BadRequestException if user has active event folders", async () => {
-      const mockUserWithFolders = {
+    it("refuse avec un message clair si le compte a un historique (au lieu d'une erreur 500)", async () => {
+      prismaService.user.findUnique.mockResolvedValue({
         ...mockUserWithoutPassword,
         eventFolders: [],
-      };
-      prismaService.user.findUnique.mockResolvedValue(mockUserWithFolders);
-      prismaService.eventFolder.findMany.mockResolvedValue([
-        { id: "folder-1", status: "BOOKED" },
-      ]);
+      });
+      withoutHistory();
+      prismaService.eventFolder.count.mockResolvedValue(2);
+      prismaService.auditLog.count.mockResolvedValue(5);
 
       await expect(service.remove("user-1")).rejects.toThrow(
-        BadRequestException,
+        /historique \(2 dossier\(s\), 5 action\(s\) tracée\(s\)\).*Désactivez-le/,
       );
       expect(prismaService.user.delete).not.toHaveBeenCalled();
     });
