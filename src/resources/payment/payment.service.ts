@@ -7,6 +7,7 @@ import {
 import { EventStatus, PaymentStatus, PaymentType, Prisma } from "@prisma/client";
 import { PdfService } from "../../common/services/pdf.service";
 import { PrismaService } from "../../common/services/prisma.service";
+import { pageParams } from "../../common/utils/pagination.util";
 import { MailService } from "../../mail/mail.service";
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { EventFolderService } from "../event-folder/event-folder.service";
@@ -101,8 +102,7 @@ export class PaymentService {
           },
         },
         orderBy: { createdAt: "desc" },
-        skip: options?.skip || 0,
-        take: options?.take || 50,
+        ...pageParams(options?.skip, options?.take),
       }),
       this.prisma.payment.count({ where }),
     ]);

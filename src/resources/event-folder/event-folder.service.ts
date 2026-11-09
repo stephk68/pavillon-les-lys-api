@@ -14,6 +14,7 @@ import {
 } from "@prisma/client";
 import * as bcrypt from "bcrypt";
 import { PdfService } from "../../common/services/pdf.service";
+import { pageParams } from "../../common/utils/pagination.util";
 import {
   intervalsOf,
   reservedOverlapping,
@@ -480,18 +481,19 @@ export class EventFolderService {
       };
     }
 
+    const { skip, take } = pageParams(options?.skip, options?.take);
     const [data, total] = await Promise.all([
       this.prisma.eventFolder.findMany({
         where,
         include: this.fullInclude(),
         orderBy: { createdAt: "desc" },
-        skip: options?.skip || 0,
-        take: options?.take || 50,
+        skip,
+        take,
       }),
       this.prisma.eventFolder.count({ where }),
     ]);
 
-    return { data, total, skip: options?.skip || 0, take: options?.take || 50 };
+    return { data, total, skip, take };
   }
 
   async findOne(id: string) {

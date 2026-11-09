@@ -30,6 +30,16 @@ import { TransitionStatusDto } from "./dto/transition-status.dto";
 import { UpdateEventFolderDto } from "./dto/update-event-folder.dto";
 import { EventFolderService } from "./event-folder.service";
 
+/**
+ * Vue client d'un dossier : sans la checklist interne (tâches du staff) ni
+ * le détail du matériel (fournisseurs, contacts, prix d'achat).
+ */
+function forClient<T extends { checklist?: unknown; equipments?: unknown }>(
+  folder: T,
+): T {
+  return { ...folder, checklist: [], equipments: [] };
+}
+
 @Controller("event-folders")
 @UseGuards(AuthenticationGuard, AuthorizationGuard)
 export class EventFolderController {
@@ -51,7 +61,7 @@ export class EventFolderController {
   }
 
   @Get()
-  findAll(
+  async findAll(
     @Query("status") status?: EventStatus,
     @Query("eventType") eventType?: EventType,
     @Query("userId") userId?: string,
@@ -63,9 +73,10 @@ export class EventFolderController {
     @CurrentUser() user?: any,
   ) {
     // Scope: CLIENT sees only their own events
-    const effectiveUserId = user?.role === Role.CLIENT ? user.id : userId;
+    const isClient = user?.role === Role.CLIENT;
+    const effectiveUserId = isClient ? user.id : userId;
 
-    return this.eventFolderService.findAll({
+    const result = await this.eventFolderService.findAll({
       status,
       eventType,
       userId: effectiveUserId,
@@ -75,6 +86,7 @@ export class EventFolderController {
       startDate: startDate ? new Date(startDate) : undefined,
       endDate: endDate ? new Date(endDate) : undefined,
     });
+    return isClient ? { ...result, data: result.data.map(forClient) } : result;
   }
 
   @Get("calendar")
@@ -101,8 +113,9 @@ export class EventFolderController {
   }
 
   @Get("my-events")
-  getMyEvents(@CurrentUser() user: any) {
-    return this.eventFolderService.findAll({ userId: user.id });
+  async getMyEvents(@CurrentUser() user: any) {
+    const result = await this.eventFolderService.findAll({ userId: user.id });
+    return { ...result, data: result.data.map(forClient) };
   }
 
   @Get("availability")
@@ -145,8 +158,11 @@ export class EventFolderController {
   async findOne(@Param("id") id: string, @CurrentUser() user: any) {
     const folder = await this.eventFolderService.findOne(id);
     // CLIENT can only see their own
-    if (user.role === Role.CLIENT && folder.userId !== user.id) {
-      throw new ForbiddenException("Accès refusé");
+    if (user.role === Role.CLIENT) {
+      if (folder.userId !== user.id) {
+        throw new ForbiddenException("Accès refusé");
+      }
+      return forClient(folder);
     }
     return folder;
   }

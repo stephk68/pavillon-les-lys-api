@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../common/services/prisma.service";
+import { pageParams } from "../../common/utils/pagination.util";
 
 export interface CreateAuditLogDto {
   action: string;
@@ -37,7 +38,8 @@ export class AuditLogService {
   }
 
   async findAll(options: FindAuditLogsOptions = {}) {
-    const { userId, action, skip = 0, take = 50 } = options;
+    const { userId, action } = options;
+    const { skip, take } = pageParams(options.skip, options.take);
 
     const where: any = {};
     if (userId) where.userId = userId;

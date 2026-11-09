@@ -8,6 +8,7 @@ import { Role, User } from "@prisma/client";
 import * as bcrypt from "bcrypt";
 import * as crypto from "crypto";
 import { PrismaService } from "../../common/services/prisma.service";
+import { pageParams } from "../../common/utils/pagination.util";
 import { MailService } from "../../mail/mail.service";
 import { CreateStaffDto } from "./dto/create-staff.dto";
 import { CreateUserDto } from "./dto/create-user.dto";
@@ -212,7 +213,8 @@ export class UserService {
   }
 
   async findAll(options?: { role?: Role; skip?: number; take?: number }) {
-    const { role, skip = 0, take = 50 } = options || {};
+    const { role } = options || {};
+    const { skip, take } = pageParams(options?.skip, options?.take);
 
     const where = role ? { role } : undefined;
 
@@ -293,6 +295,17 @@ export class UserService {
     }
 
     return user;
+  }
+
+  /**
+   * Utilisateur pour le guard d'authentification (appelé à chaque requête) :
+   * sans la liste des dossiers que charge findOne.
+   */
+  async findAuthUser(id: string): Promise<SafeUser | null> {
+    return this.prisma.user.findUnique({
+      where: { id },
+      select: SAFE_USER_SELECT,
+    });
   }
 
   async findByEmail(email: string): Promise<User | null> {

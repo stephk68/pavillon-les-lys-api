@@ -5,7 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { GlobalJwtModule } from "./common/jwt/global.module";
-import { PrismaService } from "./common/services/prisma.service";
+import { PrismaModule } from "./common/services/prisma.module";
 import { HealthModule } from "./health/health.module";
 import { MailApiModule } from "./mail/mail-api.module";
 import { MailModule } from "./mail/mail.module";
@@ -24,6 +24,7 @@ import { SchedulerModule } from "./scheduler/scheduler.module";
   imports: [
     // Charge le .env (en local) — en Docker les variables sont déjà injectées.
     ConfigModule.forRoot({ isGlobal: true }),
+    PrismaModule,
     // Limite globale généreuse (le backoffice enchaîne beaucoup de requêtes) ;
     // les routes sensibles (auth, formulaires publics) ont un @Throttle plus strict.
     ThrottlerModule.forRoot([
@@ -50,7 +51,6 @@ import { SchedulerModule } from "./scheduler/scheduler.module";
   controllers: [AppController],
   providers: [
     AppService,
-    PrismaService,
     // Sans ce guard global, les décorateurs @Throttle n'avaient aucun effet.
     { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],

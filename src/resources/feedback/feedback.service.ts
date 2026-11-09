@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import { Feedback } from "@prisma/client";
 import { PrismaService } from "../../common/services/prisma.service";
+import { pageParams } from "../../common/utils/pagination.util";
 import { CreateFeedbackDto } from "./dto/create-feedback.dto";
 import { UpdateFeedbackDto } from "./dto/update-feedback.dto";
 
@@ -107,12 +108,11 @@ export class FeedbackService {
       eventFolderId,
       rating,
       isRead,
-      skip = 0,
-      take = 50,
       startDate,
       endDate,
     } = options;
 
+    const { skip, take } = pageParams(options.skip, options.take);
     const where: any = {};
 
     if (userId) where.userId = userId;
