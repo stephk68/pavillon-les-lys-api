@@ -14,6 +14,11 @@ import {
 } from "@prisma/client";
 import * as bcrypt from "bcrypt";
 import { PdfService } from "../../common/services/pdf.service";
+import {
+  intervalsOf,
+  reservedOverlapping,
+  toInterval,
+} from "../../common/utils/schedule.util";
 import { PrismaService } from "../../common/services/prisma.service";
 import { MailService } from "../../mail/mail.service";
 import { AuditLogService } from "../audit-log/audit-log.service";
@@ -1246,29 +1251,13 @@ export class EventFolderService {
 
   // ==================== AVAILABILITY & CALENDAR ====================
 
-  /**
-   * Construit un intervalle datetime absolu [start, end) à partir d'une date
-   * (jour) et de deux heures "HH:MM". Si endTime <= startTime, l'événement passe
-   * minuit : la fin est repoussée au lendemain (overnight).
-   */
+  /** Voir common/utils/schedule.util.ts (partagé avec l'inventaire). */
   private toInterval(
     date: string | Date,
     startTime: string,
     endTime: string,
   ): [Date, Date] {
-    const base = new Date(date);
-    base.setHours(0, 0, 0, 0);
-    const [sh, sm] = startTime.split(":").map(Number);
-    const [eh, em] = endTime.split(":").map(Number);
-    const start = new Date(base);
-    start.setHours(sh, sm, 0, 0);
-    const end = new Date(base);
-    end.setHours(eh, em, 0, 0);
-    if (end <= start) {
-      // Passe minuit → se termine le lendemain.
-      end.setDate(end.getDate() + 1);
-    }
-    return [start, end];
+    return toInterval(date, startTime, endTime);
   }
 
   async checkAvailability(
@@ -1399,27 +1388,87 @@ export class EventFolderService {
 
   // ==================== EQUIPMENT MANAGEMENT ====================
 
-  async addEquipment(eventFolderId: string, dto: AddEquipmentDto) {
-    // Verify event folder exists
-    await this.findOne(eventFolderId);
+  /**
+   * Quantité d'un matériel interne encore libre sur les créneaux d'un dossier
+   * (stock total − réservations des autres dossiers actifs qui chevauchent).
+   * Le stock n'est plus un compteur global décrémenté à l'assignation :
+   * il était bloqué quelles que soient les dates et fuyait à chaque
+   * annulation ou suppression de dossier.
+   */
+  private async availableForFolder(
+    db: Prisma.TransactionClient,
+    item: { id: string; totalStock: number },
+    folder: {
+      id: string;
+      schedules: { date: Date | string; startTime: string; endTime: string }[];
+    },
+  ): Promise<number> {
+    const reservations = await db.eventEquipment.findMany({
+      where: { inventoryItemId: item.id, eventFolderId: { not: folder.id } },
+      select: {
+        quantityReserved: true,
+        eventFolderId: true,
+        eventFolder: {
+          select: {
+            status: true,
+            schedules: {
+              select: { date: true, startTime: true, endTime: true },
+            },
+          },
+        },
+      },
+    });
+    return (
+      item.totalStock -
+      reservedOverlapping(
+        reservations,
+        intervalsOf(folder.schedules),
+        folder.id,
+      )
+    );
+  }
 
-    // Verify inventory item exists and has stock
+  /** Vérifie (sous verrou) qu'une quantité de matériel interne est libre. */
+  private async assertEquipmentAvailable(
+    tx: Prisma.TransactionClient,
+    item: {
+      id: string;
+      name: string;
+      type: string;
+      status: string;
+      totalStock: number;
+    },
+    folder: {
+      id: string;
+      schedules: { date: Date | string; startTime: string; endTime: string }[];
+    },
+    quantity: number,
+  ) {
+    if (item.type !== "INTERNAL") return; // géré par le prestataire
+    if (item.status !== "AVAILABLE") {
+      throw new BadRequestException(
+        `« ${item.name} » n'est pas disponible (statut : ${item.status})`,
+      );
+    }
+    const available = await this.availableForFolder(tx, item, folder);
+    if (available < quantity) {
+      throw new BadRequestException(
+        `Stock insuffisant pour « ${item.name} » sur ces dates. ` +
+          `Disponible : ${Math.max(0, available)}, demandé : ${quantity}`,
+      );
+    }
+  }
+
+  async addEquipment(eventFolderId: string, dto: AddEquipmentDto) {
+    const folder = await this.findOne(eventFolderId);
+
     const item = await this.prisma.inventoryItem.findUnique({
       where: { id: dto.inventoryItemId },
     });
     if (!item) {
       throw new NotFoundException("Équipement introuvable dans l'inventaire");
     }
-    if (
-      item.type === "INTERNAL" &&
-      item.availableStock < dto.quantityReserved
-    ) {
-      throw new BadRequestException(
-        `Stock insuffisant. Disponible : ${item.availableStock}, Demandé : ${dto.quantityReserved}`,
-      );
-    }
 
-    // Check if already assigned
     const existing = await this.prisma.eventEquipment.findUnique({
       where: {
         eventFolderId_inventoryItemId: {
@@ -1434,8 +1483,15 @@ export class EventFolderService {
       );
     }
 
-    const [equipment] = await this.prisma.$transaction([
-      this.prisma.eventEquipment.create({
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockBooking(tx);
+      await this.assertEquipmentAvailable(
+        tx,
+        item,
+        folder,
+        dto.quantityReserved,
+      );
+      return tx.eventEquipment.create({
         data: {
           eventFolderId,
           inventoryItemId: dto.inventoryItemId,
@@ -1443,21 +1499,8 @@ export class EventFolderService {
           notes: dto.notes,
         },
         include: { inventoryItem: true },
-      }),
-      // Update available stock
-      ...(item.type === "INTERNAL"
-        ? [
-            this.prisma.inventoryItem.update({
-              where: { id: dto.inventoryItemId },
-              data: {
-                availableStock: { decrement: dto.quantityReserved },
-              },
-            }),
-          ]
-        : []),
-    ]);
-
-    return equipment;
+      });
+    });
   }
 
   async updateEquipment(
@@ -1474,68 +1517,67 @@ export class EventFolderService {
       throw new NotFoundException("Assignation d'équipement introuvable");
     }
 
-    // If quantity changed, update stock
-    if (
-      dto.quantityReserved !== undefined &&
-      dto.quantityReserved !== equipment.quantityReserved &&
-      equipment.inventoryItem.type === "INTERNAL"
-    ) {
-      const diff = dto.quantityReserved - equipment.quantityReserved;
-      if (diff > 0 && equipment.inventoryItem.availableStock < diff) {
-        throw new BadRequestException(
-          `Stock insuffisant. Disponible : ${equipment.inventoryItem.availableStock}`,
-        );
-      }
-
-      await this.prisma.inventoryItem.update({
-        where: { id: equipment.inventoryItemId },
-        data: { availableStock: { decrement: diff } },
-      });
+    const quantity = dto.quantityReserved ?? equipment.quantityReserved;
+    const returned = dto.returnedQuantity ?? equipment.returnedQuantity;
+    if (returned > quantity) {
+      throw new BadRequestException(
+        `Quantité retournée (${returned}) supérieure à la quantité réservée (${quantity})`,
+      );
     }
 
-    return this.prisma.eventEquipment.update({
-      where: { id: equipmentId },
-      data: {
-        ...(dto.quantityReserved !== undefined && {
-          quantityReserved: dto.quantityReserved,
-        }),
-        ...(dto.returnedQuantity !== undefined && {
-          returnedQuantity: dto.returnedQuantity,
-        }),
-        ...(dto.notes !== undefined && { notes: dto.notes }),
-      },
-      include: { inventoryItem: true },
+    return this.prisma.$transaction(async (tx) => {
+      if (
+        dto.quantityReserved !== undefined &&
+        dto.quantityReserved > equipment.quantityReserved
+      ) {
+        const folder = await tx.eventFolder.findUniqueOrThrow({
+          where: { id: eventFolderId },
+          select: { id: true, schedules: true },
+        });
+        await this.lockBooking(tx);
+        await this.assertEquipmentAvailable(
+          tx,
+          equipment.inventoryItem,
+          folder,
+          dto.quantityReserved,
+        );
+      }
+      return tx.eventEquipment.update({
+        where: { id: equipmentId },
+        data: {
+          ...(dto.quantityReserved !== undefined && {
+            quantityReserved: dto.quantityReserved,
+          }),
+          ...(dto.returnedQuantity !== undefined && {
+            returnedQuantity: dto.returnedQuantity,
+          }),
+          ...(dto.notes !== undefined && { notes: dto.notes }),
+        },
+        include: { inventoryItem: true },
+      });
     });
   }
 
   async removeEquipment(eventFolderId: string, equipmentId: string) {
     const equipment = await this.prisma.eventEquipment.findFirst({
       where: { id: equipmentId, eventFolderId },
-      include: { inventoryItem: true },
     });
 
     if (!equipment) {
       throw new NotFoundException("Assignation d'équipement introuvable");
     }
 
-    await this.prisma.$transaction([
-      this.prisma.eventEquipment.delete({ where: { id: equipmentId } }),
-      // Restore stock
-      ...(equipment.inventoryItem.type === "INTERNAL"
-        ? [
-            this.prisma.inventoryItem.update({
-              where: { id: equipment.inventoryItemId },
-              data: {
-                availableStock: {
-                  increment: equipment.quantityReserved,
-                },
-              },
-            }),
-          ]
-        : []),
-    ]);
+    // Plus de « restitution » de stock : la disponibilité est calculée à
+    // partir des assignations, supprimer l'assignation suffit (avant, un
+    // retour partiel suivi d'une suppression comptait le matériel deux fois).
+    await this.prisma.eventEquipment.delete({ where: { id: equipmentId } });
   }
 
+  /**
+   * Enregistre le retour du matériel après l'événement. La quantité non
+   * retournée (réservée − retournée) reste visible sur l'assignation : à
+   * l'admin d'ajuster le stock total ou de passer l'article en LOST.
+   */
   async returnEquipment(
     eventFolderId: string,
     equipmentId: string,
@@ -1544,7 +1586,6 @@ export class EventFolderService {
   ) {
     const equipment = await this.prisma.eventEquipment.findFirst({
       where: { id: equipmentId, eventFolderId },
-      include: { inventoryItem: true },
     });
 
     if (!equipment) {
@@ -1557,31 +1598,14 @@ export class EventFolderService {
       );
     }
 
-    const [updated] = await this.prisma.$transaction([
-      this.prisma.eventEquipment.update({
-        where: { id: equipmentId },
-        data: {
-          returnedQuantity,
-          notes: notes || equipment.notes,
-        },
-        include: { inventoryItem: true },
-      }),
-      // Restore returned quantity to stock
-      ...(equipment.inventoryItem.type === "INTERNAL"
-        ? [
-            this.prisma.inventoryItem.update({
-              where: { id: equipment.inventoryItemId },
-              data: {
-                availableStock: {
-                  increment: returnedQuantity - equipment.returnedQuantity,
-                },
-              },
-            }),
-          ]
-        : []),
-    ]);
-
-    return updated;
+    return this.prisma.eventEquipment.update({
+      where: { id: equipmentId },
+      data: {
+        returnedQuantity,
+        notes: notes || equipment.notes,
+      },
+      include: { inventoryItem: true },
+    });
   }
 
   // ==================== STATS ====================
