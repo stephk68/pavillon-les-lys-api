@@ -4,6 +4,22 @@ import { EventStatus } from "@prisma/client";
 import { PrismaService } from "../common/services/prisma.service";
 import { MailService } from "../mail/mail.service";
 
+/**
+ * Fenêtre [aujourd'hui + fromDays ; aujourd'hui + toDays] (journées entières).
+ * Les rappels ciblent une fenêtre plutôt qu'un jour exact : si le cron ne
+ * tourne pas un jour (redémarrage, panne), le rappel part le lendemain au
+ * lieu d'être perdu. Le drapeau reminderJ*SentAt empêche tout doublon.
+ */
+function dayWindow(fromDays: number, toDays: number) {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() + fromDays);
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  end.setDate(end.getDate() + toDays);
+  return { gte: start, lte: end };
+}
+
 @Injectable()
 export class ReminderService {
   private readonly logger = new Logger(ReminderService.name);
@@ -33,23 +49,15 @@ export class ReminderService {
    * Cible : dossiers en QUOTED (devis envoyé mais pas encore confirmé)
    */
   private async sendRemindersJ21() {
-    const now = new Date();
-    const in21Days = new Date(now);
-    in21Days.setDate(in21Days.getDate() + 21);
-
-    // Début et fin de la journée J-21
-    const dayStart = new Date(in21Days);
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(in21Days);
-    dayEnd.setHours(23, 59, 59, 999);
-
+    // Événements dans 15 à 21 jours (rattrapage si un jour a été manqué ;
+    // en deçà de J-15, c'est le rappel J-14 qui prend le relais).
     const folders = await this.prisma.eventFolder.findMany({
       where: {
         status: EventStatus.QUOTED,
         schedules: {
           some: {
-            date: { gte: dayStart, lte: dayEnd }
-          }
+            date: dayWindow(15, 21),
+          },
         },
         reminderJ21SentAt: null, // Pas encore envoyé
       },
@@ -93,22 +101,14 @@ export class ReminderService {
    * Cible : dossiers en QUOTED ou BOOKED qui nécessitent une action
    */
   private async sendRemindersJ14() {
-    const now = new Date();
-    const in14Days = new Date(now);
-    in14Days.setDate(in14Days.getDate() + 14);
-
-    const dayStart = new Date(in14Days);
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(in14Days);
-    dayEnd.setHours(23, 59, 59, 999);
-
+    // Événements dans 1 à 14 jours (rattrapage inclus).
     const folders = await this.prisma.eventFolder.findMany({
       where: {
         status: { in: [EventStatus.QUOTED, EventStatus.BOOKED] },
         schedules: {
           some: {
-            date: { gte: dayStart, lte: dayEnd }
-          }
+            date: dayWindow(1, 14),
+          },
         },
         reminderJ14SentAt: null,
       },

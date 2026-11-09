@@ -44,6 +44,9 @@ describe("FeedbackService", () => {
         aggregate: jest.fn(),
         groupBy: jest.fn(),
       },
+      eventFolder: {
+        findUnique: jest.fn(),
+      },
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -75,6 +78,11 @@ describe("FeedbackService", () => {
         comment: "Excellent service!",
         eventFolderId: "folder-1",
       };
+      prismaService.eventFolder.findUnique.mockResolvedValue({
+        userId: "user-1",
+        status: "COMPLETED",
+      });
+      prismaService.feedback.count.mockResolvedValue(0);
       prismaService.feedback.create.mockResolvedValue(mockFeedback);
 
       const result = await service.create(createFeedbackDto, "user-1");
@@ -89,6 +97,27 @@ describe("FeedbackService", () => {
         }),
       );
       expect(result).toEqual(mockFeedback);
+    });
+  });
+
+  describe("create — règles sur le dossier", () => {
+    const dto = { rating: 4, comment: "Bien", eventFolderId: "folder-1" };
+
+    it("refuse un avis sur le dossier d'un autre client", async () => {
+      prismaService.eventFolder.findUnique.mockResolvedValue({ userId: "other", status: "COMPLETED" });
+      await expect(service.create(dto, "user-1")).rejects.toThrow("vos propres événements");
+      expect(prismaService.feedback.create).not.toHaveBeenCalled();
+    });
+
+    it("refuse un avis avant la fin de l'événement", async () => {
+      prismaService.eventFolder.findUnique.mockResolvedValue({ userId: "user-1", status: "BOOKED" });
+      await expect(service.create(dto, "user-1")).rejects.toThrow("une fois l'événement terminé");
+    });
+
+    it("refuse un second avis sur le même événement", async () => {
+      prismaService.eventFolder.findUnique.mockResolvedValue({ userId: "user-1", status: "COMPLETED" });
+      prismaService.feedback.count.mockResolvedValue(1);
+      await expect(service.create(dto, "user-1")).rejects.toThrow("déjà donné votre avis");
     });
   });
 

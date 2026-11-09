@@ -21,7 +21,11 @@ import { AuthenticationGuard } from "../../common/guards/authentication.guard";
 import { AuthorizationGuard } from "../../common/guards/authorization.guard";
 import { CreateEventFolderDto } from "./dto/create-event-folder.dto";
 import { CreateReservationRequestDto } from "./dto/create-reservation-request.dto";
-import { AddEquipmentDto, UpdateEquipmentDto } from "./dto/equipment.dto";
+import {
+  AddEquipmentDto,
+  ReturnEquipmentDto,
+  UpdateEquipmentDto,
+} from "./dto/equipment.dto";
 import { TransitionStatusDto } from "./dto/transition-status.dto";
 import { UpdateEventFolderDto } from "./dto/update-event-folder.dto";
 import { EventFolderService } from "./event-folder.service";
@@ -254,7 +258,7 @@ export class EventFolderController {
   returnEquipment(
     @Param("id") id: string,
     @Param("equipmentId") equipmentId: string,
-    @Body() body: { returnedQuantity: number; notes?: string },
+    @Body() body: ReturnEquipmentDto,
   ) {
     return this.eventFolderService.returnEquipment(
       id,

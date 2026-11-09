@@ -971,13 +971,18 @@ export class EventFolderService {
             "Aucun horaire défini pour cet événement",
           );
         }
-        const lastSchedule = folder.schedules.sort(
-          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
-        )[0];
+        // Fin réelle du dernier créneau (heure de fin, lendemain si le
+        // créneau passe minuit). Avant, seule la date était comparée : on
+        // pouvait clôturer l'événement dès le matin du jour J.
+        const lastEnd = Math.max(
+          ...folder.schedules.map((s) =>
+            this.toInterval(s.date, s.startTime, s.endTime)[1].getTime(),
+          ),
+        );
 
-        if (new Date(lastSchedule.date) > new Date()) {
+        if (lastEnd > Date.now()) {
           throw new BadRequestException(
-            "L'événement n'est pas encore terminé (date de fin dans le futur)",
+            `L'événement n'est pas encore terminé (fin prévue le ${new Date(lastEnd).toLocaleString("fr-FR", { timeZone: "Africa/Abidjan" })})`,
           );
         }
 
@@ -1615,16 +1620,24 @@ export class EventFolderService {
   }
 
   async getUpcoming(days = 30) {
-    const future = new Date();
+    // Début de journée : la colonne `date` n'a pas d'heure, un événement du
+    // jour (00:00) était exclu avec `gte: now`.
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const future = new Date(today);
     future.setDate(future.getDate() + days);
 
-    return this.prisma.eventFolder.findMany({
+    const folders = await this.prisma.eventFolder.findMany({
       where: {
-        schedules: { some: { date: { gte: new Date(), lte: future } } },
+        schedules: { some: { date: { gte: today, lte: future } } },
         status: { in: [EventStatus.BOOKED, EventStatus.READY] },
       },
       include: this.fullInclude(),
-      orderBy: { createdAt: "asc" },
     });
+
+    // Tri par date du premier créneau (avant : par date de création).
+    const firstDate = (f: (typeof folders)[number]) =>
+      Math.min(...f.schedules.map((s) => new Date(s.date).getTime()));
+    return folders.sort((a, b) => firstDate(a) - firstDate(b));
   }
 }
