@@ -152,7 +152,7 @@ jobs:
             docker compose pull api
 
             echo "🚀 Redémarrage de l'API…"
-            docker compose up -d api
+            docker compose up -d --no-deps api
 
             echo "⏳ Attente de l'état healthy (migrations + démarrage)…"
             CID="$(docker compose ps -q api)"
@@ -169,7 +169,7 @@ jobs:
               if [ -n "${PREV_TAG}" ]; then
                 echo "↩️ Rollback vers ${PREV_TAG}…"
                 set_tag "${PREV_TAG}"
-                docker compose up -d api
+                docker compose up -d --no-deps api
               fi
               exit 1
             fi
