@@ -11,6 +11,7 @@ import {
   Res,
   UseGuards,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { EventStatus, EventType, Role } from "@prisma/client";
 import { Response } from "express";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
@@ -40,6 +41,7 @@ export class EventFolderController {
 
   @Post("request")
   @Public()
+  @Throttle({ default: { ttl: 60000, limit: 3 } })
   createPublicRequest(@Body() dto: CreateReservationRequestDto) {
     return this.eventFolderService.createPublicRequest(dto);
   }

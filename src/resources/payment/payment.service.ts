@@ -12,6 +12,16 @@ import { AuditLogService } from "../audit-log/audit-log.service";
 import { EventFolderService } from "../event-folder/event-folder.service";
 import { CreatePaymentDto, UpdatePaymentDto } from "./dto/payment.dto";
 
+/** Échappe le texte injecté dans le HTML rendu par Puppeteer. */
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 @Injectable()
 export class PaymentService {
   private readonly logger = new Logger(PaymentService.name);
@@ -415,12 +425,12 @@ export class PaymentService {
         <div class="info">
           <div>
             <strong>Client:</strong><br>
-            ${client.firstName} ${client.lastName}<br>
-            ${client.email}<br>
-            ${client.phone || ""}
+            ${escapeHtml(client.firstName)} ${escapeHtml(client.lastName)}<br>
+            ${escapeHtml(client.email)}<br>
+            ${escapeHtml(client.phone)}
           </div>
           <div style="text-align: right;">
-            <strong>Dossier:</strong> ${folder.folderNumber}<br>
+            <strong>Dossier:</strong> ${escapeHtml(folder.folderNumber)}<br>
             <strong>Date:</strong> ${new Date(payment.paidAt || payment.createdAt).toLocaleDateString("fr-FR")}<br>
             <strong>Statut:</strong> ${payment.status}
           </div>

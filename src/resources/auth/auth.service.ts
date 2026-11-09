@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcrypt";
+import { randomInt } from "crypto";
 import { PrismaService } from "../../common/services/prisma.service";
 import { MailService } from "../../mail/mail.service";
 import { UserService } from "../user/user.service";
@@ -18,6 +19,13 @@ import { RegisterDto } from "./dto/register.dto";
 import { ResetPasswordDto } from "./dto/reset-password.dto";
 import { SetFirstPasswordDto } from "./dto/set-first-password.dto";
 import { VerifyOtpDto } from "./dto/verify-otp.dto";
+
+/** Nombre d'essais autorisés par code OTP avant invalidation. */
+const OTP_MAX_ATTEMPTS = 5;
+/** Durée de validité d'un code OTP. */
+const OTP_TTL_MS = 10 * 60 * 1000;
+/** Délai minimal avant de pouvoir regénérer un code (anti-spam / anti-reset du compteur). */
+const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
 
 @Injectable()
 export class AuthService {
@@ -87,7 +95,15 @@ export class AuthService {
     const token = this.jwtService.sign(payload);
 
     // Retourner l'utilisateur sans le mot de passe
-    const { password, ...userWithoutPassword } = user;
+    const {
+      password,
+      otpCode,
+      otpExpiry,
+      otpAttempts,
+      resetToken,
+      resetTokenExpiry,
+      ...userWithoutPassword
+    } = user;
 
     return {
       user: userWithoutPassword,
@@ -311,8 +327,18 @@ export class AuthService {
     }
 
     if (user.isFirstLogin) {
-      // Générer un code OTP à 6 chiffres
-      const otpPlain = Math.floor(100000 + Math.random() * 900000).toString();
+      // Un code a été émis il y a moins d'une minute : on ne le regénère pas.
+      // Sinon, redemander un code remettrait le compteur d'essais à zéro et
+      // permettrait de brute-forcer l'OTP en boucle.
+      const issuedAt = user.otpExpiry
+        ? user.otpExpiry.getTime() - OTP_TTL_MS
+        : 0;
+      if (user.otpCode && Date.now() - issuedAt < OTP_RESEND_COOLDOWN_MS) {
+        return { status: "REGISTERED_FIRST_LOGIN" };
+      }
+
+      // Code OTP à 6 chiffres, générateur cryptographiquement sûr
+      const otpPlain = randomInt(100000, 1000000).toString();
       const otpHashed = await bcrypt.hash(otpPlain, 10);
 
       // Stocker le hash avec expiration 10 minutes
@@ -320,7 +346,8 @@ export class AuthService {
         where: { id: user.id },
         data: {
           otpCode: otpHashed,
-          otpExpiry: new Date(Date.now() + 10 * 60 * 1000),
+          otpExpiry: new Date(Date.now() + OTP_TTL_MS),
+          otpAttempts: 0,
         },
       });
 
@@ -351,13 +378,28 @@ export class AuthService {
 
     const isOtpValid = await bcrypt.compare(verifyOtpDto.otp, user.otpCode);
     if (!isOtpValid) {
+      // Incrément atomique ; au-delà du maximum, le code est invalidé.
+      const { otpAttempts } = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { otpAttempts: { increment: 1 } },
+        select: { otpAttempts: true },
+      });
+      if (otpAttempts >= OTP_MAX_ATTEMPTS) {
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { otpCode: null, otpExpiry: null, otpAttempts: 0 },
+        });
+        throw new UnauthorizedException(
+          "Trop de tentatives. Demandez un nouveau code.",
+        );
+      }
       throw new UnauthorizedException("Code OTP invalide");
     }
 
     // Invalider le code OTP après utilisation
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { otpCode: null, otpExpiry: null },
+      data: { otpCode: null, otpExpiry: null, otpAttempts: 0 },
     });
 
     // Générer un token temporaire (15 min) qui prouve la vérification OTP
@@ -425,6 +467,7 @@ export class AuthService {
       password,
       otpCode,
       otpExpiry,
+      otpAttempts,
       resetToken,
       resetTokenExpiry,
       ...userWithoutSensitive

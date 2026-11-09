@@ -4,6 +4,8 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { PrismaService } from "../../common/services/prisma.service";
 import { AuthService } from "../../resources/auth/auth.service";
 import { UserService } from "../../resources/user/user.service";
+import { MailService } from "../../mail/mail.service";
+import { mockMailService } from "../mocks/services.mock";
 
 describe("AuthService", () => {
   let service: AuthService;
@@ -35,6 +37,7 @@ describe("AuthService", () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: MailService, useValue: mockMailService },
         AuthService,
         {
           provide: PrismaService,
@@ -72,6 +75,7 @@ describe("AuthService", () => {
       email: "test@example.com",
       password: "hashedPassword",
       role: "CLIENT",
+      isActive: true,
       firstName: "John",
       lastName: "Doe",
     };

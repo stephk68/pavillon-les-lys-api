@@ -36,6 +36,15 @@ function generateFolderNumber() {
 // ============================================================================
 
 async function main() {
+  // Ce seed crée des comptes de démo au mot de passe public (Password123!).
+  // Il ne doit JAMAIS tourner en production, sauf demande explicite.
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_DEMO_SEED !== "true") {
+    console.error(
+      "⛔ Seed de démo refusé en production (définir ALLOW_DEMO_SEED=true pour forcer).",
+    );
+    process.exit(1);
+  }
+
   console.log("🌱 Seeding database...\n");
 
   // ──────────────────────────────────────────

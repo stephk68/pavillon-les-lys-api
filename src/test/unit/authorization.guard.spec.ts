@@ -57,6 +57,16 @@ describe('AuthorizationGuard', () => {
       expect(result).toBe(true);
     });
 
+    it('should let @Public() routes through even with class-level @Roles', () => {
+      // isPublic = true, puis roles = [ADMIN] (posé sur la classe)
+      mockReflector.getAllAndOverride
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce([Role.ADMIN]);
+      const context = createMockExecutionContext(null);
+
+      expect(guard.canActivate(context)).toBe(true);
+    });
+
     it('should allow access when user has required role', () => {
       const requiredRoles = [Role.ADMIN];
       const user = { id: 'user-1', role: Role.ADMIN };

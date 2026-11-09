@@ -1,0 +1,92 @@
+# ============================================================
+# Pavillon Les Lys — API — compose de PRODUCTION (VPS)
+# Copie de référence du fichier présent sur le serveur dans
+# $VPS_API_DEPLOY_DIR/docker-compose.yml. Toute modification ici doit
+# être recopiée sur le serveur (la CI ne déploie que l'image).
+#
+# Variables attendues dans le .env du serveur (jamais commité) :
+#   ENV_SUFFIX, IMAGE_TAG (géré par la CI), POSTGRES_DB, POSTGRES_USER,
+#   POSTGRES_PASSWORD, DATABASE_URL, JWT_SECRET (≥ 32 caractères),
+#   MAIL_*, FRONTEND_URL, FRONTOFFICE_URL, BACKOFFICE_URL, PORT,
+#   TRUST_PROXY (1 derrière nginx), POSTGRES_BIND (127.0.0.1 recommandé)
+# ============================================================
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: pavillon_db_${ENV_SUFFIX}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # Port hôte différent du Postgres système (qui occupe déjà 5432).
+    # POSTGRES_BIND=127.0.0.1 : base joignable uniquement depuis le serveur
+    # (tunnel SSH pour un accès distant). 0.0.0.0 l'expose sur Internet.
+    ports:
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_HOST_PORT:-5433}:5432"
+    networks:
+      - pavillon_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: kysaymeric/pavillon-les-lys:${IMAGE_TAG:-latest}
+    container_name: pavillon_api_${ENV_SUFFIX}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${PORT:-4000}
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-}
+      JWT_ACCESS_EXPIRATION_MINUTES: ${JWT_ACCESS_EXPIRATION_MINUTES:-15}
+      JWT_REFRESH_EXPIRATION_DAYS: ${JWT_REFRESH_EXPIRATION_DAYS:-30}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
+      MAIL_HOST: ${MAIL_HOST}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USER: ${MAIL_USER}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
+      MAIL_FROM: ${MAIL_FROM}
+      FRONTEND_URL: ${FRONTEND_URL:-https://pavillonleslys.ci}
+      BACKOFFICE_URL: ${BACKOFFICE_URL:-https://admin.pavillonleslys.ci}
+      FRONTOFFICE_URL: ${FRONTOFFICE_URL:-https://pavillonleslys.ci}
+      BCRYPT_ROUNDS: ${BCRYPT_SALT_ROUNDS:-12}
+      CAUTION_AMOUNT: ${CAUTION_AMOUNT:-100000}
+      # nginx (sur l'hôte) est le seul proxy devant l'API.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+    volumes:
+      - uploads_data:/app/uploads
+    # Uniquement en local : le trafic public passe par nginx
+    # (api.pavillonleslys.ci → 127.0.0.1:PORT). Exposer le port publiquement
+    # permettrait de falsifier X-Forwarded-For et de contourner le rate limiting.
+    ports:
+      - "127.0.0.1:${PORT:-4000}:${PORT:-4000}"
+    networks:
+      - pavillon_network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${PORT:-4000}/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_data:
+    name: pavillon_postgres_data_${ENV_SUFFIX}
+  uploads_data:
+    name: pavillon_uploads_data_${ENV_SUFFIX}
+
+networks:
+  pavillon_network:
+    name: pavillon_network_${ENV_SUFFIX}
+    driver: bridge

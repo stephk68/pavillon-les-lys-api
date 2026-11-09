@@ -1,7 +1,18 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Post,
+  UseGuards,
+} from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { Role } from "@prisma/client";
 import { Roles } from "../common/decorators/permission.decorator";
 import { Public } from "../common/decorators/public.decorator";
+import { AuthenticationGuard } from "../common/guards/authentication.guard";
+import { AuthorizationGuard } from "../common/guards/authorization.guard";
+import { ContactMessageDto } from "./dto/contact-message.dto";
 import { MailService } from "./mail.service";
 
 /**
@@ -10,6 +21,7 @@ import { MailService } from "./mail.service";
  * ⚠️ Protégé par le rôle ADMIN uniquement.
  */
 @Controller("mail")
+@UseGuards(AuthenticationGuard, AuthorizationGuard)
 @Roles(Role.ADMIN)
 export class MailController {
   constructor(private readonly mailService: MailService) {}
@@ -144,19 +156,10 @@ export class MailController {
    * POST /mail/contact
    */
   @Public()
+  @Throttle({ default: { ttl: 60000, limit: 3 } })
   @Post("contact")
   @HttpCode(HttpStatus.OK)
-  async sendContactMessage(
-    @Body()
-    body: {
-      firstName: string;
-      lastName: string;
-      email: string;
-      phone?: string;
-      eventType?: string;
-      message: string;
-    },
-  ) {
+  async sendContactMessage(@Body() body: ContactMessageDto) {
     try {
       await this.mailService.sendContactMessage(body);
       return {

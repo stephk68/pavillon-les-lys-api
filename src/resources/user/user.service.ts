@@ -13,6 +13,17 @@ import { CreateStaffDto } from "./dto/create-staff.dto";
 import { CreateUserDto } from "./dto/create-user.dto";
 import { UpdateUserDto } from "./dto/update-user.dto";
 
+/** Utilisateur sans aucun champ sensible (mot de passe, OTP, token de reset). */
+export type SafeUser = Omit<
+  User,
+  | "password"
+  | "otpCode"
+  | "otpExpiry"
+  | "otpAttempts"
+  | "resetToken"
+  | "resetTokenExpiry"
+>;
+
 @Injectable()
 export class UserService {
   constructor(
@@ -22,7 +33,7 @@ export class UserService {
 
   async register(
     createUserDto: CreateUserDto,
-  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">> {
+  ): Promise<SafeUser> {
     // Vérifier si l'utilisateur existe déjà
     const existingUser = await this.prisma.user.findUnique({
       where: { email: createUserDto.email },
@@ -56,8 +67,6 @@ export class UserService {
         isActive: true,
         isFirstLogin: true,
         lastLoginAt: true,
-        resetToken: true,
-        resetTokenExpiry: true,
         createdAt: true,
         updatedAt: true,
         createdBy: true,
@@ -70,7 +79,7 @@ export class UserService {
 
   async createStaff(
     createStaffDto: CreateStaffDto,
-  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">> {
+  ): Promise<SafeUser> {
     // Vérifier si l'utilisateur existe déjà
     const existingUser = await this.prisma.user.findUnique({
       where: { email: createStaffDto.email },
@@ -115,8 +124,6 @@ export class UserService {
         isActive: true,
         isFirstLogin: true,
         lastLoginAt: true,
-        resetToken: true,
-        resetTokenExpiry: true,
         createdAt: true,
         updatedAt: true,
         createdBy: true,
@@ -150,8 +157,6 @@ export class UserService {
           isActive: true,
           isFirstLogin: true,
           lastLoginAt: true,
-          resetToken: true,
-          resetTokenExpiry: true,
           createdAt: true,
           updatedAt: true,
           createdBy: true,
@@ -172,7 +177,7 @@ export class UserService {
 
   async findOne(
     id: string,
-  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">> {
+  ): Promise<SafeUser> {
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
@@ -185,8 +190,6 @@ export class UserService {
         isActive: true,
         isFirstLogin: true,
         lastLoginAt: true,
-        resetToken: true,
-        resetTokenExpiry: true,
         createdAt: true,
         updatedAt: true,
         createdBy: true,
@@ -227,7 +230,7 @@ export class UserService {
   async update(
     id: string,
     updateUserDto: UpdateUserDto,
-  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">> {
+  ): Promise<SafeUser> {
     // Vérifier si l'utilisateur existe
     await this.findOne(id);
 
@@ -255,8 +258,6 @@ export class UserService {
         isActive: true,
         isFirstLogin: true,
         lastLoginAt: true,
-        resetToken: true,
-        resetTokenExpiry: true,
         createdAt: true,
         updatedAt: true,
         createdBy: true,
@@ -350,7 +351,7 @@ export class UserService {
 
   async searchUsers(
     query: string,
-  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">[]> {
+  ): Promise<SafeUser[]> {
     return this.prisma.user.findMany({
       where: {
         OR: [
@@ -369,8 +370,6 @@ export class UserService {
         isActive: true,
         isFirstLogin: true,
         lastLoginAt: true,
-        resetToken: true,
-        resetTokenExpiry: true,
         createdAt: true,
         updatedAt: true,
         createdBy: true,
@@ -390,7 +389,7 @@ export class UserService {
 
   async toggleStatus(
     id: string,
-  ): Promise<Omit<User, "password" | "otpCode" | "otpExpiry">> {
+  ): Promise<SafeUser> {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) {
       throw new NotFoundException(`Utilisateur avec l'ID ${id} non trouvé`);
@@ -409,8 +408,6 @@ export class UserService {
         isActive: true,
         isFirstLogin: true,
         lastLoginAt: true,
-        resetToken: true,
-        resetTokenExpiry: true,
         createdAt: true,
         updatedAt: true,
         createdBy: true,

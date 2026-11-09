@@ -7,6 +7,8 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { Role } from "@prisma/client";
 import { PrismaService } from "../../common/services/prisma.service";
 import { UserService } from "../../resources/user/user.service";
+import { MailService } from "../../mail/mail.service";
+import { mockMailService } from "../mocks/services.mock";
 
 // Mock bcrypt
 jest.mock("bcrypt", () => ({
@@ -73,6 +75,7 @@ describe("UserService", () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: MailService, useValue: mockMailService },
         UserService,
         {
           provide: PrismaService,

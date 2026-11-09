@@ -99,8 +99,10 @@ export class PaymentController {
   }
 
   @Get(":id")
-  findOne(@Param("id") id: string) {
-    return this.paymentService.findOne(id);
+  async findOne(@Param("id") id: string, @CurrentUser() user: any) {
+    const payment = await this.paymentService.findOne(id);
+    this.assertCanAccess(payment, user);
+    return payment;
   }
 
   @Patch(":id")
@@ -122,7 +124,13 @@ export class PaymentController {
   }
 
   @Get(":id/invoice-pdf")
-  async getInvoicePdf(@Param("id") id: string, @Res() res: Response) {
+  async getInvoicePdf(
+    @Param("id") id: string,
+    @CurrentUser() user: any,
+    @Res() res: Response,
+  ) {
+    const payment = await this.paymentService.findOne(id);
+    this.assertCanAccess(payment, user);
     const buffer = await this.paymentService.generateInvoicePdf(id);
     res.set({
       "Content-Type": "application/pdf",
@@ -164,9 +172,7 @@ export class PaymentController {
     const payment = await this.paymentService.findOne(id);
 
     // CLIENT can only upload for their own payments
-    if (user.role === Role.CLIENT && payment.userId !== user.id) {
-      throw new ForbiddenException("Accès refusé");
-    }
+    this.assertCanAccess(payment, user);
 
     return this.paymentService.updateProofDocument(id, file.filename);
   }
@@ -175,5 +181,20 @@ export class PaymentController {
   @Roles(Role.ADMIN)
   remove(@Param("id") id: string) {
     return this.paymentService.remove(id);
+  }
+
+  /**
+   * Un CLIENT n'accède qu'aux paiements de ses propres dossiers ;
+   * le staff (ADMIN / EVENT_MANAGER) accède à tout.
+   */
+  private assertCanAccess(
+    payment: { userId: string | null; eventFolder?: { user?: { id: string } | null } | null },
+    user: any,
+  ) {
+    if (user.role !== Role.CLIENT) return;
+    const ownerId = payment.userId ?? payment.eventFolder?.user?.id;
+    if (ownerId !== user.id) {
+      throw new ForbiddenException("Accès refusé");
+    }
   }
 }
